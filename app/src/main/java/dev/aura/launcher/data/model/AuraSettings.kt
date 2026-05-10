@@ -1,0 +1,8 @@
+package dev.aura.launcher.data.model
+
+data class AuraSettings(
+    val gridColumns:      Int     = 4,
+    val darkThemeMode:    String  = "system",   // "system" | "light" | "dark"
+    val notificationDots: Boolean = true,
+    val iconPackPackage:  String  = ""           // empty = system icons
+)
