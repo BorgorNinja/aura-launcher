@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -33,29 +32,34 @@ data class AuraUiState(
     val searchQuery:   String        = "",
     val searchResults: List<AppInfo> = emptyList(),
     val isSearching:   Boolean       = false,
-    val settings:      AuraSettings  = AuraSettings()
+    val settings:      AuraSettings  = AuraSettings(),
+    val widgetIds:     List<Int>     = emptyList()
 )
 
-// ─── One-shot side effects (need Activity context) ────────────────────────────
+// ─── Side effects ─────────────────────────────────────────────────────────────
 
 sealed interface SideEffect {
-    data object PickWallpaper                   : SideEffect
-    data class  Uninstall(val packageName: String) : SideEffect
+    data object PickWallpaper                         : SideEffect
+    data class  Uninstall(val packageName: String)    : SideEffect
+    data object PickWidget                            : SideEffect
 }
 
 // ─── Events ──────────────────────────────────────────────────────────────────
 
 sealed interface AuraEvent {
-    data class SelectTab(val tab: NavigationTab)      : AuraEvent
-    data class Search(val query: String)              : AuraEvent
-    data class Launch(val packageName: String)        : AuraEvent
-    data class Uninstall(val packageName: String)     : AuraEvent
-    data class ShowAppInfo(val packageName: String)   : AuraEvent
-    data class SetGridColumns(val columns: Int)       : AuraEvent
-    data class SetDarkTheme(val mode: String)         : AuraEvent
-    data class SetNotifDots(val enabled: Boolean)     : AuraEvent
-    data object ClearSearch                           : AuraEvent
-    data object PickWallpaper                         : AuraEvent
+    data class SelectTab(val tab: NavigationTab)       : AuraEvent
+    data class Search(val query: String)               : AuraEvent
+    data class Launch(val packageName: String)         : AuraEvent
+    data class Uninstall(val packageName: String)      : AuraEvent
+    data class ShowAppInfo(val packageName: String)    : AuraEvent
+    data class SetGridColumns(val columns: Int)        : AuraEvent
+    data class SetDarkTheme(val mode: String)          : AuraEvent
+    data class SetNotifDots(val enabled: Boolean)      : AuraEvent
+    data class AddWidget(val id: Int)                  : AuraEvent
+    data class RemoveWidget(val id: Int)               : AuraEvent
+    data object ClearSearch                            : AuraEvent
+    data object PickWallpaper                          : AuraEvent
+    data object PickWidget                             : AuraEvent
 }
 
 // ─── ViewModel ───────────────────────────────────────────────────────────────
@@ -75,23 +79,23 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     private val _query = MutableStateFlow("")
 
     init {
-        // Apps list
         appRepo.allApps.onEach { list ->
             _state.update { it.copy(
                 apps     = list,
                 dockApps = list.sortedByDescending { a -> a.launchCount }.take(4)
-            ) }
+            )}
         }.launchIn(viewModelScope)
 
-        // Settings
         settingsRepo.settings.onEach { s ->
             _state.update { it.copy(settings = s) }
         }.launchIn(viewModelScope)
 
-        // Debounced search
+        settingsRepo.widgetIds.onEach { ids ->
+            _state.update { it.copy(widgetIds = ids) }
+        }.launchIn(viewModelScope)
+
         viewModelScope.launch {
-            _query
-                .debounce(120)
+            _query.debounce(120)
                 .flatMapLatest { q -> flow { emit(if (q.isBlank()) emptyList() else appRepo.search(q)) } }
                 .collect { results -> _state.update { it.copy(searchResults = results) } }
         }
@@ -100,23 +104,21 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     fun onEvent(event: AuraEvent) {
         when (event) {
             is AuraEvent.SelectTab    -> _state.update { it.copy(selectedTab = event.tab) }
-
-            is AuraEvent.Search -> {
+            is AuraEvent.Search       -> {
                 _query.value = event.query
                 _state.update { it.copy(searchQuery = event.query, isSearching = event.query.isNotBlank()) }
             }
-
-            AuraEvent.ClearSearch -> {
+            AuraEvent.ClearSearch     -> {
                 _query.value = ""
                 _state.update { it.copy(searchQuery = "", isSearching = false, searchResults = emptyList()) }
             }
-
-            is AuraEvent.Launch      -> viewModelScope.launch { appRepo.launch(getApplication(), event.packageName) }
-            is AuraEvent.Uninstall   -> viewModelScope.launch { _sideEffects.emit(SideEffect.Uninstall(event.packageName)) }
-            is AuraEvent.ShowAppInfo -> viewModelScope.launch { appRepo.openAppInfo(getApplication(), event.packageName) }
-
-            AuraEvent.PickWallpaper  -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWallpaper) }
-
+            is AuraEvent.Launch       -> viewModelScope.launch { appRepo.launch(getApplication(), event.packageName) }
+            is AuraEvent.Uninstall    -> viewModelScope.launch { _sideEffects.emit(SideEffect.Uninstall(event.packageName)) }
+            is AuraEvent.ShowAppInfo  -> viewModelScope.launch { appRepo.openAppInfo(getApplication(), event.packageName) }
+            AuraEvent.PickWallpaper   -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWallpaper) }
+            AuraEvent.PickWidget      -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWidget) }
+            is AuraEvent.AddWidget    -> viewModelScope.launch { settingsRepo.addWidgetId(event.id) }
+            is AuraEvent.RemoveWidget -> viewModelScope.launch { settingsRepo.removeWidgetId(event.id) }
             is AuraEvent.SetGridColumns -> viewModelScope.launch { settingsRepo.setGridColumns(event.columns) }
             is AuraEvent.SetDarkTheme   -> viewModelScope.launch { settingsRepo.setDarkThemeMode(event.mode) }
             is AuraEvent.SetNotifDots   -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
