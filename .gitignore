@@ -9,7 +9,6 @@ keystore.properties
 
 # Gradle caches
 .gradle/
-gradle/wrapper/gradle-wrapper.jar
 
 # IDE directories (project must not depend on these)
 .idea/
