@@ -2,8 +2,7 @@ package dev.aura.launcher.ui.widgets
 
 import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import android.os.Bundle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,14 +10,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -26,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -79,8 +82,11 @@ fun WidgetDashboardScreen(
                         val info = runCatching { manager.getAppWidgetInfo(widgetId) }.getOrNull()
                         if (info != null) {
                             HostedWidget(
-                                widgetId = widgetId,
+                                widgetId  = widgetId,
                                 minHeight = info.minHeight.coerceAtLeast(120),
+                                minWidth  = info.minWidth.coerceAtLeast(40),
+                                maxWidth  = info.maxResizeWidth.coerceAtLeast(info.minWidth),
+                                maxHeight = info.maxResizeHeight.coerceAtLeast(info.minHeight),
                                 onRemove  = {
                                     runCatching { host.deleteAppWidgetId(widgetId) }
                                     onEvent(AuraEvent.RemoveWidget(widgetId))
@@ -97,7 +103,7 @@ fun WidgetDashboardScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 modifier       = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 20.dp, bottom = 90.dp)
+                    .padding(end = 20.dp, bottom = 24.dp)
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add widget")
             }
@@ -107,37 +113,73 @@ fun WidgetDashboardScreen(
 
 // ─── Hosted widget card ───────────────────────────────────────────────────────
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HostedWidget(
     widgetId:  Int,
     minHeight: Int,
+    minWidth:  Int,
+    maxWidth:  Int,
+    maxHeight: Int,
     onRemove:  () -> Unit
 ) {
-    val host            = LocalWidgetHost.current ?: return
-    val context         = LocalContext.current
+    val host    = LocalWidgetHost.current ?: return
+    val context = LocalContext.current
     var showRemoveDialog by remember { mutableStateOf(false) }
 
-    Card(
-        shape  = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick    = {},
-                onLongClick = { showRemoveDialog = true }
+    // NOTE: No combinedClickable / pointerInput on this Box.
+    // The AppWidgetHostView is an Android View — any Compose gesture modifier
+    // on the parent card would intercept touch events before they reach the widget,
+    // making interactive widgets (music players, toggles, etc.) non-functional.
+    // Instead, we surface a dedicated remove button.
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Card(
+            shape  = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    val info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(widgetId)
+                    host.createView(ctx, widgetId, info).also { view ->
+                        // Inform the widget provider of its allocated size so it renders correctly
+                        AppWidgetManager.getInstance(ctx).updateAppWidgetOptions(
+                            widgetId,
+                            Bundle().apply {
+                                putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,  minWidth)
+                                putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH,  maxWidth)
+                                putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, minHeight)
+                                putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, maxHeight)
+                            }
+                        )
+                    } as AppWidgetHostView
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(minHeight.dp)
+                    .padding(8.dp)
             )
-    ) {
-        AndroidView(
-            factory = { ctx ->
-                val info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(widgetId)
-                host.createView(ctx, widgetId, info) as AppWidgetHostView
-            },
+        }
+
+        // Remove button — sits in top-right corner, above the widget surface
+        IconButton(
+            onClick  = { showRemoveDialog = true },
             modifier = Modifier
-                .fillMaxWidth()
-                .height(minHeight.dp)
-                .padding(8.dp)
-        )
+                .align(Alignment.TopEnd)
+                .offset(x = (-4).dp, y = 4.dp)
+                .size(32.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove widget",
+                    tint     = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(4.dp)
+                )
+            }
+        }
     }
 
     if (showRemoveDialog) {
@@ -175,7 +217,7 @@ private fun WidgetEmptyState(onAdd: () -> Unit) {
             Text("No widgets yet",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
             Spacer(Modifier.height(8.dp))
-            Text("Long-press a widget to remove it.",
+            Text("Tap + to add widgets to your dashboard.",
                 style = MaterialTheme.typography.bodySmall.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant))
             Spacer(Modifier.height(20.dp))

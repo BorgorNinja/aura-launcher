@@ -1,16 +1,18 @@
 package dev.aura.launcher.ui
 
-import androidx.compose.animation.AnimatedContent
+import android.appwidget.AppWidgetHost
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
@@ -25,6 +27,8 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,7 +41,20 @@ import dev.aura.launcher.ui.navigation.NavigationTab
 import dev.aura.launcher.ui.settings.SettingsScreen
 import dev.aura.launcher.ui.widgets.WidgetDashboardScreen
 import dev.aura.launcher.widget.LocalWidgetHost
-import android.appwidget.AppWidgetHost
+
+private val TAB_ORDER = listOf(
+    NavigationTab.HOME,
+    NavigationTab.WIDGETS,
+    NavigationTab.APPS,
+    NavigationTab.SETTINGS
+)
+
+private val NAV_ITEMS = listOf(
+    Triple(NavigationTab.HOME,     Icons.Default.Home,     "Home"),
+    Triple(NavigationTab.WIDGETS,  Icons.Default.Widgets,  "Widgets"),
+    Triple(NavigationTab.APPS,     Icons.Default.Apps,     "Drawer"),
+    Triple(NavigationTab.SETTINGS, Icons.Default.Settings, "Settings")
+)
 
 @Composable
 fun MainScreen(
@@ -46,25 +63,37 @@ fun MainScreen(
     widgetHost:  AppWidgetHost?,
     onAddWidget: () -> Unit
 ) {
+    val pagerState = rememberPagerState(
+        initialPage = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
+    ) { TAB_ORDER.size }
+
+    // Programmatic tab switch → animate pager
+    LaunchedEffect(state.selectedTab) {
+        val page = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
+        if (pagerState.currentPage != page) {
+            pagerState.animateScrollToPage(page)
+        }
+    }
+
+    // User swipes pager → update tab state
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            val tab = TAB_ORDER[page]
+            if (tab != state.selectedTab) onEvent(AuraEvent.SelectTab(tab))
+        }
+    }
+
+    // Nav bar hides on Widgets and Settings — user navigates via swipe there
+    val showNav = state.selectedTab == NavigationTab.HOME || state.selectedTab == NavigationTab.APPS
+
     CompositionLocalProvider(LocalWidgetHost provides widgetHost) {
         Box(modifier = Modifier.fillMaxSize()) {
 
-            AnimatedContent(
-                targetState = state.selectedTab,
-                transitionSpec = {
-                    when {
-                        initialState == NavigationTab.HOME && targetState == NavigationTab.APPS ->
-                            slideInVertically { it } + fadeIn() togetherWith
-                            slideOutVertically { -it / 4 } + fadeOut()
-                        initialState == NavigationTab.APPS && targetState == NavigationTab.HOME ->
-                            slideInVertically { -it / 4 } + fadeIn() togetherWith
-                            slideOutVertically { it } + fadeOut()
-                        else -> fadeIn() togetherWith fadeOut()
-                    }
-                },
-                label = "tab_transition"
-            ) { tab ->
-                when (tab) {
+            HorizontalPager(
+                state    = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (TAB_ORDER[page]) {
                     NavigationTab.HOME     -> HomeTab(state = state, onEvent = onEvent)
                     NavigationTab.WIDGETS  -> WidgetDashboardScreen(state = state, onEvent = onEvent, onAddWidget = onAddWidget)
                     NavigationTab.APPS     -> DrawerScreen(state = state, onEvent = onEvent)
@@ -72,7 +101,10 @@ fun MainScreen(
                 }
             }
 
-            Box(
+            AnimatedVisibility(
+                visible  = showNav,
+                enter    = slideInVertically { it } + fadeIn(),
+                exit     = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -83,12 +115,7 @@ fun MainScreen(
                     tonalElevation = 8.dp,
                     modifier       = Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
                 ) {
-                    listOf(
-                        Triple(NavigationTab.HOME,     Icons.Default.Home,     "Home"),
-                        Triple(NavigationTab.WIDGETS,  Icons.Default.Widgets,  "Widgets"),
-                        Triple(NavigationTab.APPS,     Icons.Default.Apps,     "Drawer"),
-                        Triple(NavigationTab.SETTINGS, Icons.Default.Settings, "Settings")
-                    ).forEach { (tab, icon, label) ->
+                    NAV_ITEMS.forEach { (tab, icon, label) ->
                         NavigationBarItem(
                             selected = state.selectedTab == tab,
                             onClick  = { onEvent(AuraEvent.SelectTab(tab)) },

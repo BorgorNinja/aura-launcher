@@ -15,11 +15,13 @@ private val Context.dataStore by preferencesDataStore("aura_settings")
 class SettingsRepository(private val context: Context) {
 
     companion object {
-        val KEY_GRID_COLUMNS      = intPreferencesKey("grid_columns")
-        val KEY_DARK_THEME_MODE   = stringPreferencesKey("dark_theme_mode")
-        val KEY_NOTIFICATION_DOTS = booleanPreferencesKey("notification_dots")
-        val KEY_ICON_PACK         = stringPreferencesKey("icon_pack")
-        val KEY_WIDGET_IDS        = stringPreferencesKey("widget_ids")   // comma-separated ints
+        val KEY_GRID_COLUMNS       = intPreferencesKey("grid_columns")
+        val KEY_DARK_THEME_MODE    = stringPreferencesKey("dark_theme_mode")
+        val KEY_NOTIFICATION_DOTS  = booleanPreferencesKey("notification_dots")
+        val KEY_ICON_PACK          = stringPreferencesKey("icon_pack")
+        val KEY_WIDGET_IDS         = stringPreferencesKey("widget_ids")
+        val KEY_SWIPE_DOWN_ACTION  = stringPreferencesKey("swipe_down_action")
+        val KEY_DOUBLE_TAP_ACTION  = stringPreferencesKey("double_tap_action")
     }
 
     val settings: Flow<AuraSettings> = context.dataStore.data.map { prefs ->
@@ -27,7 +29,9 @@ class SettingsRepository(private val context: Context) {
             gridColumns      = prefs[KEY_GRID_COLUMNS]      ?: 4,
             darkThemeMode    = prefs[KEY_DARK_THEME_MODE]   ?: "system",
             notificationDots = prefs[KEY_NOTIFICATION_DOTS] ?: true,
-            iconPackPackage  = prefs[KEY_ICON_PACK]         ?: ""
+            iconPackPackage  = prefs[KEY_ICON_PACK]         ?: "",
+            swipeDownAction  = prefs[KEY_SWIPE_DOWN_ACTION] ?: "notifications",
+            doubleTapAction  = prefs[KEY_DOUBLE_TAP_ACTION] ?: "none"
         )
     }
 
@@ -38,29 +42,22 @@ class SettingsRepository(private val context: Context) {
             .mapNotNull { it.toIntOrNull() }
     }
 
-    suspend fun setGridColumns(value: Int) =
-        context.dataStore.edit { it[KEY_GRID_COLUMNS] = value.coerceIn(3, 6) }
-
-    suspend fun setDarkThemeMode(value: String) =
-        context.dataStore.edit { it[KEY_DARK_THEME_MODE] = value }
-
-    suspend fun setNotificationDots(value: Boolean) =
-        context.dataStore.edit { it[KEY_NOTIFICATION_DOTS] = value }
-
-    suspend fun setIconPack(pkg: String) =
-        context.dataStore.edit { it[KEY_ICON_PACK] = pkg }
+    suspend fun setGridColumns(value: Int)        = context.dataStore.edit { it[KEY_GRID_COLUMNS]      = value.coerceIn(3, 6) }
+    suspend fun setDarkThemeMode(value: String)   = context.dataStore.edit { it[KEY_DARK_THEME_MODE]   = value }
+    suspend fun setNotificationDots(value: Boolean) = context.dataStore.edit { it[KEY_NOTIFICATION_DOTS] = value }
+    suspend fun setIconPack(pkg: String)          = context.dataStore.edit { it[KEY_ICON_PACK]         = pkg }
+    suspend fun setSwipeDownAction(action: String) = context.dataStore.edit { it[KEY_SWIPE_DOWN_ACTION] = action }
+    suspend fun setDoubleTapAction(action: String) = context.dataStore.edit { it[KEY_DOUBLE_TAP_ACTION] = action }
 
     suspend fun addWidgetId(id: Int) = context.dataStore.edit { prefs ->
-        val current = prefs[KEY_WIDGET_IDS] ?: ""
-        val ids = current.split(",").filter { it.isNotBlank() }.toMutableList()
+        val ids = (prefs[KEY_WIDGET_IDS] ?: "").split(",").filter { it.isNotBlank() }.toMutableList()
         if (!ids.contains(id.toString())) ids.add(id.toString())
         prefs[KEY_WIDGET_IDS] = ids.joinToString(",")
     }
 
     suspend fun removeWidgetId(id: Int) = context.dataStore.edit { prefs ->
         val ids = (prefs[KEY_WIDGET_IDS] ?: "")
-            .split(",")
-            .filter { it.isNotBlank() && it != id.toString() }
+            .split(",").filter { it.isNotBlank() && it != id.toString() }
         prefs[KEY_WIDGET_IDS] = ids.joinToString(",")
     }
 }

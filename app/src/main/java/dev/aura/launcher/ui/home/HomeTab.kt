@@ -1,9 +1,15 @@
 package dev.aura.launcher.ui.home
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.provider.AlarmClock
+import android.provider.MediaStore
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,21 +53,73 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// ─── Gesture action executor ──────────────────────────────────────────────────
+
+@SuppressLint("WrongConstant")
+fun expandNotificationPanel(context: Context) {
+    runCatching {
+        val service = context.getSystemService("statusbar")
+        service?.javaClass?.getMethod("expandNotificationsPanel")?.invoke(service)
+    }
+}
+
+fun executeGestureAction(context: Context, action: String) {
+    when (action) {
+        "notifications" -> expandNotificationPanel(context)
+        "camera" -> runCatching {
+            context.startActivity(
+                Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        }
+        "clock" -> runCatching {
+            context.startActivity(
+                Intent(AlarmClock.ACTION_SHOW_ALARMS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        }
+        "assistant" -> runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VOICE_COMMAND).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        }
+        // "none" → do nothing
+    }
+}
+
+// ─── HomeTab ──────────────────────────────────────────────────────────────────
+
 @Composable
 fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
+    val context = LocalContext.current
+    val settings = state.settings
     var dragY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            // Vertical swipe: up → Apps drawer, down → configurable action
+            .pointerInput("swipe") {
                 detectVerticalDragGestures(
                     onDragStart    = { dragY = 0f },
                     onDragEnd      = {
-                        if (dragY < -80f) onEvent(AuraEvent.SelectTab(NavigationTab.APPS))
+                        when {
+                            dragY < -80f -> onEvent(AuraEvent.SelectTab(NavigationTab.APPS))
+                            dragY > 80f  -> executeGestureAction(context, settings.swipeDownAction)
+                        }
                         dragY = 0f
                     },
                     onVerticalDrag = { _, delta -> dragY += delta }
+                )
+            }
+            // Double tap → configurable action
+            .pointerInput("doubletap") {
+                detectTapGestures(
+                    onDoubleTap = { executeGestureAction(context, settings.doubleTapAction) }
                 )
             }
     ) {
@@ -71,8 +130,10 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(12.dp))
-            SearchPill(onClick = { onEvent(AuraEvent.SelectTab(NavigationTab.APPS)) },
-                       modifier = Modifier.padding(horizontal = 16.dp))
+            SearchPill(
+                onClick  = { onEvent(AuraEvent.SelectTab(NavigationTab.APPS)) },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
             Spacer(Modifier.weight(1f))
             ClockBlock()
             Spacer(Modifier.weight(1f))
@@ -100,10 +161,12 @@ private fun SearchPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(horizontal = 16.dp)
         ) {
             Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary)
-            Text("Search apps & web",
+            Text(
+                "Search apps & web",
                 style    = MaterialTheme.typography.bodyLarge,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 12.dp))
+                modifier = Modifier.padding(start = 12.dp)
+            )
         }
     }
 }
@@ -137,9 +200,9 @@ private fun DockRow(apps: List<AppInfo>, onLaunch: (String) -> Unit, onLongPress
             verticalAlignment     = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()   // clears system nav bar
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 12.dp)
-                .padding(bottom = 72.dp)   // clear the floating bottom nav bar
+                .padding(bottom = 72.dp)
         ) {
             apps.forEach { app -> DockIcon(app = app, onClick = { onLaunch(app.packageName) }) }
         }

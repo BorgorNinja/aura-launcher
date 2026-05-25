@@ -1,5 +1,12 @@
 package dev.aura.launcher.ui.settings
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +34,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -54,18 +61,52 @@ fun SettingsScreen(
     state:   AuraUiState,
     onEvent: (AuraEvent) -> Unit
 ) {
+    var showGestures by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = showGestures) { showGestures = false }
+
+    AnimatedContent(
+        targetState = showGestures,
+        transitionSpec = {
+            if (targetState) {
+                slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it / 3 } + fadeOut()
+            } else {
+                slideInHorizontally { -it / 3 } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
+            }
+        },
+        label = "settings_nav"
+    ) { gestures ->
+        if (gestures) {
+            GestureSettingsScreen(
+                state   = state,
+                onEvent = onEvent,
+                onBack  = { showGestures = false }
+            )
+        } else {
+            SettingsContent(
+                state             = state,
+                onEvent           = onEvent,
+                onOpenGestures    = { showGestures = true }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsContent(
+    state:          AuraUiState,
+    onEvent:        (AuraEvent) -> Unit,
+    onOpenGestures: () -> Unit
+) {
     val settings = state.settings
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color    = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 100.dp)
+                .padding(bottom = 32.dp)
         ) {
             // ── Header ───────────────────────────────────────────────
             Row(
@@ -80,7 +121,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text  = "Launcher Settings",
+                    "Launcher Settings",
                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -89,9 +130,7 @@ fun SettingsScreen(
             Card(
                 shape  = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -110,14 +149,15 @@ fun SettingsScreen(
                         Text(
                             "Personalize your space",
                             style = MaterialTheme.typography.titleLarge.copy(
-                                color      = Color.White,
-                                fontWeight = FontWeight.Bold
+                                color = Color.White, fontWeight = FontWeight.Bold
                             )
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "Tailor your home screen experience\nwith advanced Material You styling.",
-                            style = MaterialTheme.typography.bodyMedium.copy(color = Color.White.copy(alpha = 0.85f))
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = Color.White.copy(alpha = 0.85f)
+                            )
                         )
                     }
                 }
@@ -133,9 +173,9 @@ fun SettingsScreen(
                     icon     = Icons.Default.DarkMode,
                     title    = "Theme",
                     subtitle = when (settings.darkThemeMode) {
-                        "light"  -> "Light"
-                        "dark"   -> "Dark"
-                        else     -> "System default"
+                        "light" -> "Light"
+                        "dark"  -> "Dark"
+                        else    -> "System default"
                     },
                     onClick  = {
                         val next = when (settings.darkThemeMode) {
@@ -146,7 +186,7 @@ fun SettingsScreen(
                         onEvent(AuraEvent.SetDarkTheme(next))
                     }
                 )
-                Divider(modifier = Modifier.padding(start = 56.dp))
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                 SettingsRow(
                     icon     = Icons.Default.Palette,
                     title    = "Icon Pack",
@@ -161,7 +201,6 @@ fun SettingsScreen(
             SectionHeader("LAYOUT & FEEL")
 
             SettingsGroup {
-                // Grid columns slider
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Row(
                         verticalAlignment     = Alignment.CenterVertically,
@@ -172,16 +211,12 @@ fun SettingsScreen(
                             Box(
                                 modifier = Modifier
                                     .size(40.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        CircleShape
-                                    ),
+                                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    Icons.Default.GridView,
-                                    contentDescription = null,
-                                    tint   = MaterialTheme.colorScheme.primary,
+                                    Icons.Default.GridView, null,
+                                    tint     = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -206,16 +241,32 @@ fun SettingsScreen(
                     )
                 }
 
-                Divider(modifier = Modifier.padding(start = 56.dp))
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 
+                // Gestures row — fully functional now
                 SettingsRow(
                     icon     = Icons.Default.TouchApp,
                     title    = "Gestures",
-                    subtitle = "Swipe actions and shortcuts",
-                    onClick  = { /* TODO: gesture settings sub-screen */ }
+                    subtitle = buildString {
+                        val sd = when (settings.swipeDownAction) {
+                            "notifications" -> "Swipe ↓ Notifications"
+                            "camera"        -> "Swipe ↓ Camera"
+                            "assistant"     -> "Swipe ↓ Assistant"
+                            else            -> "Swipe ↓ Off"
+                        }
+                        val dt = when (settings.doubleTapAction) {
+                            "clock"     -> "· 2× Clock"
+                            "camera"    -> "· 2× Camera"
+                            "assistant" -> "· 2× Assistant"
+                            else        -> ""
+                        }
+                        append(sd)
+                        if (dt.isNotEmpty()) append("  $dt")
+                    },
+                    onClick  = onOpenGestures
                 )
 
-                Divider(modifier = Modifier.padding(start = 56.dp))
+                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 
                 SettingsRowToggle(
                     icon     = Icons.Default.Notifications,
@@ -242,12 +293,9 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Wallpaper CTA ────────────────────────────────────────
             Card(
                 shape  = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                ),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -290,21 +338,12 @@ private fun SettingsGroup(content: @Composable () -> Unit) {
     Card(
         shape    = RoundedCornerShape(20.dp),
         colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-    ) {
-        content()
-    }
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+    ) { content() }
 }
 
 @Composable
-private fun SettingsRow(
-    icon:     ImageVector,
-    title:    String,
-    subtitle: String,
-    onClick:  () -> Unit
-) {
+private fun SettingsRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -318,14 +357,16 @@ private fun SettingsRow(
                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title,    style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurfaceVariant))
         }
-        Text("›", style = MaterialTheme.typography.titleLarge.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+        Text("›", style = MaterialTheme.typography.titleLarge.copy(
+            color = MaterialTheme.colorScheme.onSurfaceVariant))
     }
 }
 
@@ -339,9 +380,7 @@ private fun SettingsRowToggle(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Box(
             modifier = Modifier
@@ -349,12 +388,13 @@ private fun SettingsRowToggle(
                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title,    style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant))
+            Text(subtitle, style = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurfaceVariant))
         }
         Switch(checked = checked, onCheckedChange = onToggle)
     }

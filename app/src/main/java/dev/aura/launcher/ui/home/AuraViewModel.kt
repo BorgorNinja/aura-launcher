@@ -39,9 +39,8 @@ data class AuraUiState(
 // ─── Side effects ─────────────────────────────────────────────────────────────
 
 sealed interface SideEffect {
-    data object PickWallpaper                         : SideEffect
-    data class  Uninstall(val packageName: String)    : SideEffect
-    data object PickWidget                            : SideEffect
+    data object PickWallpaper : SideEffect
+    data object PickWidget    : SideEffect
 }
 
 // ─── Events ──────────────────────────────────────────────────────────────────
@@ -57,6 +56,8 @@ sealed interface AuraEvent {
     data class SetNotifDots(val enabled: Boolean)      : AuraEvent
     data class AddWidget(val id: Int)                  : AuraEvent
     data class RemoveWidget(val id: Int)               : AuraEvent
+    data class SetSwipeDownAction(val action: String)  : AuraEvent
+    data class SetDoubleTapAction(val action: String)  : AuraEvent
     data object ClearSearch                            : AuraEvent
     data object PickWallpaper                          : AuraEvent
     data object PickWidget                             : AuraEvent
@@ -73,7 +74,7 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     private val _state       = MutableStateFlow(AuraUiState())
     val state: StateFlow<AuraUiState> = _state
 
-    private val _sideEffects = MutableSharedFlow<SideEffect>()
+    private val _sideEffects = MutableSharedFlow<SideEffect>(extraBufferCapacity = 1)
     val sideEffects: SharedFlow<SideEffect> = _sideEffects.asSharedFlow()
 
     private val _query = MutableStateFlow("")
@@ -103,25 +104,28 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onEvent(event: AuraEvent) {
         when (event) {
-            is AuraEvent.SelectTab    -> _state.update { it.copy(selectedTab = event.tab) }
-            is AuraEvent.Search       -> {
+            is AuraEvent.SelectTab          -> _state.update { it.copy(selectedTab = event.tab) }
+            is AuraEvent.Search             -> {
                 _query.value = event.query
                 _state.update { it.copy(searchQuery = event.query, isSearching = event.query.isNotBlank()) }
             }
-            AuraEvent.ClearSearch     -> {
+            AuraEvent.ClearSearch           -> {
                 _query.value = ""
                 _state.update { it.copy(searchQuery = "", isSearching = false, searchResults = emptyList()) }
             }
-            is AuraEvent.Launch       -> viewModelScope.launch { appRepo.launch(getApplication(), event.packageName) }
-            is AuraEvent.Uninstall    -> viewModelScope.launch { _sideEffects.emit(SideEffect.Uninstall(event.packageName)) }
-            is AuraEvent.ShowAppInfo  -> viewModelScope.launch { appRepo.openAppInfo(getApplication(), event.packageName) }
-            AuraEvent.PickWallpaper   -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWallpaper) }
-            AuraEvent.PickWidget      -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWidget) }
-            is AuraEvent.AddWidget    -> viewModelScope.launch { settingsRepo.addWidgetId(event.id) }
-            is AuraEvent.RemoveWidget -> viewModelScope.launch { settingsRepo.removeWidgetId(event.id) }
-            is AuraEvent.SetGridColumns -> viewModelScope.launch { settingsRepo.setGridColumns(event.columns) }
-            is AuraEvent.SetDarkTheme   -> viewModelScope.launch { settingsRepo.setDarkThemeMode(event.mode) }
-            is AuraEvent.SetNotifDots   -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
+            is AuraEvent.Launch             -> viewModelScope.launch { appRepo.launch(getApplication(), event.packageName) }
+            // Uninstall: call repo directly — avoids SharedFlow timing issues and uses proper FLAG_ACTIVITY_NEW_TASK
+            is AuraEvent.Uninstall          -> viewModelScope.launch { appRepo.uninstall(getApplication(), event.packageName) }
+            is AuraEvent.ShowAppInfo        -> viewModelScope.launch { appRepo.openAppInfo(getApplication(), event.packageName) }
+            AuraEvent.PickWallpaper         -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWallpaper) }
+            AuraEvent.PickWidget            -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWidget) }
+            is AuraEvent.AddWidget          -> viewModelScope.launch { settingsRepo.addWidgetId(event.id) }
+            is AuraEvent.RemoveWidget       -> viewModelScope.launch { settingsRepo.removeWidgetId(event.id) }
+            is AuraEvent.SetGridColumns     -> viewModelScope.launch { settingsRepo.setGridColumns(event.columns) }
+            is AuraEvent.SetDarkTheme       -> viewModelScope.launch { settingsRepo.setDarkThemeMode(event.mode) }
+            is AuraEvent.SetNotifDots       -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
+            is AuraEvent.SetSwipeDownAction -> viewModelScope.launch { settingsRepo.setSwipeDownAction(event.action) }
+            is AuraEvent.SetDoubleTapAction -> viewModelScope.launch { settingsRepo.setDoubleTapAction(event.action) }
         }
     }
 

@@ -46,7 +46,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Image read permission ─────────────────────────────────────────────────
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) openGallery() }
@@ -61,7 +60,6 @@ class MainActivity : ComponentActivity() {
 
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
         if (info?.configure != null) {
-            // Widget needs a configuration step before adding
             widgetConfigLauncher.launch(
                 Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
                     component = info.configure
@@ -73,7 +71,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Widget configure ──────────────────────────────────────────────────────
     private val widgetConfigLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -91,9 +88,8 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
 
-        // Init before setContent so sideEffects collector never races composition
-        vm          = ViewModelProvider(this, AuraViewModel.Factory(application))[AuraViewModel::class.java]
-        widgetHost  = AppWidgetHost(this, WIDGET_HOST_ID)
+        vm         = ViewModelProvider(this, AuraViewModel.Factory(application))[AuraViewModel::class.java]
+        widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
 
         setContent {
             val state by vm.state.collectAsStateWithLifecycle()
@@ -116,20 +112,14 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 vm.sideEffects.collect { effect ->
                     when (effect) {
-                        SideEffect.PickWallpaper          -> requestWallpaperFromGallery()
-                        is SideEffect.Uninstall           -> startActivity(
-                            Intent(Intent.ACTION_DELETE).apply {
-                                data = Uri.parse("package:${effect.packageName}")
-                            }
-                        )
-                        SideEffect.PickWidget             -> launchWidgetPicker()
+                        SideEffect.PickWallpaper -> requestWallpaperFromGallery()
+                        SideEffect.PickWidget    -> launchWidgetPicker()
                     }
                 }
             }
         }
     }
 
-    // ── Home button press → navigate back to Home tab ─────────────────────────
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.action == Intent.ACTION_MAIN) {
@@ -137,7 +127,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Widget host lifecycle ─────────────────────────────────────────────────
     override fun onStart() {
         super.onStart()
         runCatching { widgetHost.startListening() }
@@ -155,11 +144,8 @@ class MainActivity : ComponentActivity() {
         else
             Manifest.permission.READ_EXTERNAL_STORAGE
 
-        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
-            openGallery()
-        } else {
-            permissionLauncher.launch(permission)
-        }
+        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) openGallery()
+        else permissionLauncher.launch(permission)
     }
 
     private fun openGallery() {
@@ -172,18 +158,14 @@ class MainActivity : ComponentActivity() {
 
     private fun applyWallpaper(uri: Uri) {
         runCatching {
-            WallpaperManager.getInstance(this).setStream(
-                contentResolver.openInputStream(uri)
-            )
+            WallpaperManager.getInstance(this).setStream(contentResolver.openInputStream(uri))
         }
     }
 
-    // ── Widget picker ─────────────────────────────────────────────────────────
     private fun launchWidgetPicker() {
         runCatching { widgetPickerLauncher.launch(widgetPickerIntent(widgetHost)) }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
     private fun isSystemDark(): Boolean {
         val mode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         return mode == Configuration.UI_MODE_NIGHT_YES
