@@ -31,13 +31,14 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Upload Debug APK
+      - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: aura-launcher-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
+      # ── Signed release (only when keystore secrets are set) ───────────────
       - name: Decode Keystore
         if: env.KEYSTORE_BASE64 != ''
         env:
@@ -56,17 +57,28 @@ jobs:
             "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
           ./gradlew assembleRelease --no-daemon
 
-      - name: Upload Release APK
-        if: env.KEYSTORE_BASE64 != ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        uses: actions/upload-artifact@v4
+      # ── Auto-update "latest" pre-release on every push to main ────────────
+      - name: Update latest pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
-          name: aura-launcher-release
-          path: app/build/outputs/apk/release/*.apk
-          retention-days: 90
+          tag_name:   latest
+          name:       "Latest Build"
+          prerelease: true
+          body: |
+            🤖 Automatically updated on every push to `main`.
 
-      - name: Create GitHub Release
+            **Commit:** ${{ github.sha }}
+            **Message:** ${{ github.event.head_commit.message }}
+
+            > This is a rolling pre-release — not a stable version tag.
+            > For versioned releases, push a tag like `v1.0.0`.
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Versioned release on tag push (e.g. v1.0.0) ──────────────────────
+      - name: Create versioned release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
