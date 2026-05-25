@@ -57,36 +57,23 @@ jobs:
             "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
           ./gradlew assembleRelease --no-daemon
 
-      # ── Auto-update "latest" pre-release on every push to main ────────────
-      - name: Delete existing latest tag
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          gh release delete latest --yes || true
-          git push origin :refs/tags/latest || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create fresh latest pre-release
+      # ── New versioned release on every push to main ───────────────────────
+      - name: Create release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name:   latest
-          name:       "Latest Build"
+          tag_name:   v0.${{ github.run_number }}
+          name:       "Build #${{ github.run_number }}"
           prerelease: true
           body: |
-            🤖 Automatically updated on every push to `main`.
-
             **Commit:** ${{ github.sha }}
             **Message:** ${{ github.event.head_commit.message }}
-
-            > This is a rolling pre-release — not a stable version tag.
-            > For versioned releases, push a tag like `v1.0.0`.
           files: app/build/outputs/apk/debug/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Versioned release on tag push (e.g. v1.0.0) ──────────────────────
-      - name: Create versioned release
+      # ── Stable versioned release on manual tag (e.g. v1.0.0) ─────────────
+      - name: Create stable release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
