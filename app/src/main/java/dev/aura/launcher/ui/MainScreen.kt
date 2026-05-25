@@ -67,7 +67,7 @@ fun MainScreen(
         initialPage = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
     ) { TAB_ORDER.size }
 
-    // Programmatic tab switch → animate pager
+    // Tab selection via nav bar → animate pager to that page
     LaunchedEffect(state.selectedTab) {
         val page = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
         if (pagerState.currentPage != page) {
@@ -75,16 +75,20 @@ fun MainScreen(
         }
     }
 
-    // User swipes pager → update tab state
+    // Pager swipe settles on a page → update tab state
+    // FIX: use `settledPage` (fires only when swipe is complete, not mid-scroll)
+    //      and no condition — the closure would otherwise capture a stale
+    //      `state.selectedTab` from initial composition, causing swiping back
+    //      to HOME from WIDGETS to silently no-op (HOME != HOME → false).
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }.collect { page ->
-            val tab = TAB_ORDER[page]
-            if (tab != state.selectedTab) onEvent(AuraEvent.SelectTab(tab))
+        snapshotFlow { pagerState.settledPage }.collect { page ->
+            onEvent(AuraEvent.SelectTab(TAB_ORDER[page]))
         }
     }
 
-    // Nav bar hides on Widgets and Settings — user navigates via swipe there
-    val showNav = state.selectedTab == NavigationTab.HOME || state.selectedTab == NavigationTab.APPS
+    // Nav bar hidden on Widgets and Settings — user navigates via swipe
+    val showNav = state.selectedTab == NavigationTab.HOME ||
+                  state.selectedTab == NavigationTab.APPS
 
     CompositionLocalProvider(LocalWidgetHost provides widgetHost) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -113,7 +117,9 @@ fun MainScreen(
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                     tonalElevation = 8.dp,
-                    modifier       = Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
+                    modifier       = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(32.dp))
                 ) {
                     NAV_ITEMS.forEach { (tab, icon, label) ->
                         NavigationBarItem(

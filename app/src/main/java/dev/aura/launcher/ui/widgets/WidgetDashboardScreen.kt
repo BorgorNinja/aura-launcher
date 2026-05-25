@@ -2,11 +2,12 @@ package dev.aura.launcher.ui.widgets
 
 import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
-import android.os.Bundle
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -83,10 +85,7 @@ fun WidgetDashboardScreen(
                         if (info != null) {
                             HostedWidget(
                                 widgetId  = widgetId,
-                                minHeight = info.minHeight.coerceAtLeast(120),
-                                minWidth  = info.minWidth.coerceAtLeast(40),
-                                maxWidth  = info.maxResizeWidth.coerceAtLeast(info.minWidth),
-                                maxHeight = info.maxResizeHeight.coerceAtLeast(info.minHeight),
+                                minHeight = info.minHeight.coerceIn(80, 400),
                                 onRemove  = {
                                     runCatching { host.deleteAppWidgetId(widgetId) }
                                     onEvent(AuraEvent.RemoveWidget(widgetId))
@@ -117,41 +116,47 @@ fun WidgetDashboardScreen(
 private fun HostedWidget(
     widgetId:  Int,
     minHeight: Int,
-    minWidth:  Int,
-    maxWidth:  Int,
-    maxHeight: Int,
     onRemove:  () -> Unit
 ) {
     val host    = LocalWidgetHost.current ?: return
     val context = LocalContext.current
     var showRemoveDialog by remember { mutableStateOf(false) }
+    // Track whether createView failed so we can show an error card instead of crashing
+    var createFailed by remember { mutableStateOf(false) }
 
-    // NOTE: No combinedClickable / pointerInput on this Box.
-    // The AppWidgetHostView is an Android View — any Compose gesture modifier
-    // on the parent card would intercept touch events before they reach the widget,
-    // making interactive widgets (music players, toggles, etc.) non-functional.
-    // Instead, we surface a dedicated remove button.
+    if (createFailed) {
+        WidgetErrorCard(onRemove = onRemove)
+        return
+    }
+
+    // No combinedClickable / pointerInput on the wrapper — any Compose gesture
+    // modifier intercepts touch events before they reach the AppWidgetHostView,
+    // breaking interactive widgets (toggles, buttons, seek bars, etc.).
+    // The ✕ button is a separate composable that handles its own clicks.
     Box(modifier = Modifier.fillMaxWidth()) {
         Card(
             shape  = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
             modifier = Modifier.fillMaxWidth()
         ) {
-            AndroidView(
+            // FIX: wrap createView() in try-catch.
+            // Without this, any RemoteException / SecurityException from
+            // AppWidgetService crashes the Activity, killing the launcher
+            // process and causing Android to revert to the previous default.
+            // updateAppWidgetOptions() is intentionally omitted — it throws
+            // SecurityException on Android 12+ for non-system launchers.
+            AndroidView<android.view.View>(
                 factory = { ctx ->
-                    val info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(widgetId)
-                    host.createView(ctx, widgetId, info).also { view ->
-                        // Inform the widget provider of its allocated size so it renders correctly
-                        AppWidgetManager.getInstance(ctx).updateAppWidgetOptions(
-                            widgetId,
-                            Bundle().apply {
-                                putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,  minWidth)
-                                putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH,  maxWidth)
-                                putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, minHeight)
-                                putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, maxHeight)
-                            }
-                        )
-                    } as AppWidgetHostView
+                    try {
+                        val info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(widgetId)
+                        host.createView(ctx, widgetId, info)
+                    } catch (e: Exception) {
+                        // Signal the Compose layer to swap to the error card on next frame
+                        createFailed = true
+                        android.view.View(ctx)
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -160,7 +165,8 @@ private fun HostedWidget(
             )
         }
 
-        // Remove button — sits in top-right corner, above the widget surface
+        // Remove button — sits above the widget surface, not inside it,
+        // so it never interferes with widget touch handling
         IconButton(
             onClick  = { showRemoveDialog = true },
             modifier = Modifier
@@ -168,10 +174,7 @@ private fun HostedWidget(
                 .offset(x = (-4).dp, y = 4.dp)
                 .size(32.dp)
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.errorContainer
-            ) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.errorContainer) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "Remove widget",
@@ -185,15 +188,54 @@ private fun HostedWidget(
     if (showRemoveDialog) {
         AlertDialog(
             onDismissRequest = { showRemoveDialog = false },
-            title   = { Text("Remove widget?") },
-            text    = { Text("This widget will be removed from your dashboard.") },
-            confirmButton = {
+            title            = { Text("Remove widget?") },
+            text             = { Text("This widget will be removed from your dashboard.") },
+            confirmButton    = {
                 TextButton(onClick = { showRemoveDialog = false; onRemove() }) { Text("Remove") }
             },
-            dismissButton = {
+            dismissButton    = {
                 TextButton(onClick = { showRemoveDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+// ─── Error card (shown when createView fails) ─────────────────────────────────
+
+@Composable
+private fun WidgetErrorCard(onRemove: () -> Unit) {
+    Card(
+        shape  = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint     = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Widget unavailable",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                    Text("This widget could not be loaded.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant))
+                }
+            }
+            TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+        }
     }
 }
 
@@ -209,7 +251,9 @@ private fun WidgetEmptyState(onAdd: () -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth().padding(40.dp)
+            modifier            = Modifier
+                .fillMaxWidth()
+                .padding(40.dp)
         ) {
             Icon(Icons.Default.Widgets, null,
                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
