@@ -58,7 +58,15 @@ jobs:
           ./gradlew assembleRelease --no-daemon
 
       # ── Auto-update "latest" pre-release on every push to main ────────────
-      - name: Update latest pre-release
+      - name: Delete existing latest tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gh release delete latest --yes || true
+          git push origin :refs/tags/latest || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create fresh latest pre-release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
