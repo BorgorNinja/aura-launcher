@@ -1,6 +1,6 @@
 package dev.aura.launcher.ui
 
-import android.appwidget.AppWidgetHost
+import dev.aura.launcher.widget.SafeAppWidgetHost
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -60,7 +60,7 @@ private val NAV_ITEMS = listOf(
 fun MainScreen(
     state:       AuraUiState,
     onEvent:     (AuraEvent) -> Unit,
-    widgetHost:  AppWidgetHost?,
+    widgetHost:  SafeAppWidgetHost?,
     onAddWidget: () -> Unit
 ) {
     val pagerState = rememberPagerState(

@@ -1,13 +1,11 @@
 package dev.aura.launcher.ui.widgets
 
-import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,6 +13,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +48,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import dev.aura.launcher.ui.home.AuraEvent
 import dev.aura.launcher.ui.home.AuraUiState
 import dev.aura.launcher.widget.LocalWidgetHost
+import dev.aura.launcher.widget.SafeAppWidgetHostView
 
 @Composable
 fun WidgetDashboardScreen(
@@ -62,7 +62,6 @@ fun WidgetDashboardScreen(
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(modifier = Modifier.fillMaxSize()) {
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -118,21 +117,15 @@ private fun HostedWidget(
     minHeight: Int,
     onRemove:  () -> Unit
 ) {
-    val host    = LocalWidgetHost.current ?: return
-    val context = LocalContext.current
-    var showRemoveDialog by remember { mutableStateOf(false) }
-    // Track whether createView failed so we can show an error card instead of crashing
+    val host = LocalWidgetHost.current ?: return
     var createFailed by remember { mutableStateOf(false) }
+    var showRemoveDialog by remember { mutableStateOf(false) }
 
     if (createFailed) {
         WidgetErrorCard(onRemove = onRemove)
         return
     }
 
-    // No combinedClickable / pointerInput on the wrapper — any Compose gesture
-    // modifier intercepts touch events before they reach the AppWidgetHostView,
-    // breaking interactive widgets (toggles, buttons, seek bars, etc.).
-    // The ✕ button is a separate composable that handles its own clicks.
     Box(modifier = Modifier.fillMaxWidth()) {
         Card(
             shape  = RoundedCornerShape(20.dp),
@@ -141,19 +134,18 @@ private fun HostedWidget(
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
-            // FIX: wrap createView() in try-catch.
-            // Without this, any RemoteException / SecurityException from
-            // AppWidgetService crashes the Activity, killing the launcher
-            // process and causing Android to revert to the previous default.
-            // updateAppWidgetOptions() is intentionally omitted — it throws
-            // SecurityException on Android 12+ for non-system launchers.
             AndroidView<android.view.View>(
                 factory = { ctx ->
                     try {
                         val info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(widgetId)
-                        host.createView(ctx, widgetId, info)
+                        // Use SafeAppWidgetHostView — its onCreateView override returns this
+                        // subclass which wraps updateAppWidget() in try-catch, preventing
+                        // RemoteViews inflation crashes (custom views, large bitmaps, etc.)
+                        // from propagating up to kill the launcher Activity.
+                        (host.createView(ctx, widgetId, info) as SafeAppWidgetHostView).also {
+                            it.onError = { createFailed = true }
+                        }
                     } catch (e: Exception) {
-                        // Signal the Compose layer to swap to the error card on next frame
                         createFailed = true
                         android.view.View(ctx)
                     }
@@ -165,8 +157,6 @@ private fun HostedWidget(
             )
         }
 
-        // Remove button — sits above the widget surface, not inside it,
-        // so it never interferes with widget touch handling
         IconButton(
             onClick  = { showRemoveDialog = true },
             modifier = Modifier
@@ -200,7 +190,7 @@ private fun HostedWidget(
     }
 }
 
-// ─── Error card (shown when createView fails) ─────────────────────────────────
+// ─── Error card ───────────────────────────────────────────────────────────────
 
 @Composable
 private fun WidgetErrorCard(onRemove: () -> Unit) {
@@ -220,8 +210,7 @@ private fun WidgetErrorCard(onRemove: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    Icons.Default.ErrorOutline,
-                    contentDescription = null,
+                    Icons.Default.ErrorOutline, null,
                     tint     = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(20.dp)
                 )
@@ -234,7 +223,9 @@ private fun WidgetErrorCard(onRemove: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant))
                 }
             }
-            TextButton(onClick = onRemove) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onRemove) {
+                Text("Remove", color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }
@@ -251,9 +242,7 @@ private fun WidgetEmptyState(onAdd: () -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier            = Modifier
-                .fillMaxWidth()
-                .padding(40.dp)
+            modifier            = Modifier.fillMaxWidth().padding(40.dp)
         ) {
             Icon(Icons.Default.Widgets, null,
                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))

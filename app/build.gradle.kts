@@ -8,6 +8,11 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// ─── Version (injected by CI, falls back to defaults locally) ────────────────
+// Pass via: ./gradlew assembleDebug -PversionCode=42 -PversionName=1.0.42
+val ciVersionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+val ciVersionName = (project.findProperty("versionName") as String?) ?: "1.0.0-dev"
+
 // ─── Signing ─────────────────────────────────────────────────────────────────
 // Place keystore.properties alongside this file (never commit it).
 // Generate keystore: keytool -genkey -v -keystore aura.jks -keyalg RSA -keysize 2048 -validity 10000
@@ -24,8 +29,8 @@ android {
         applicationId         = "dev.aura.launcher"
         minSdk                = 26          // Android 8 — covers 98%+ active devices
         targetSdk             = 35
-        versionCode           = 1
-        versionName           = "1.0.0"
+        versionCode           = ciVersionCode
+        versionName           = ciVersionName
 
         // Room schema export — written to app/schemas/ for version tracking via git.
         javaCompileOptions {

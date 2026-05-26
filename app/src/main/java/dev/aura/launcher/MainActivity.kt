@@ -2,7 +2,7 @@ package dev.aura.launcher
 
 import android.Manifest
 import android.app.WallpaperManager
-import android.appwidget.AppWidgetHost
+import dev.aura.launcher.widget.SafeAppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private lateinit var vm: AuraViewModel
-    private lateinit var widgetHost: AppWidgetHost
+    private lateinit var widgetHost: SafeAppWidgetHost
 
     // ── Gallery → wallpaper ───────────────────────────────────────────────────
     private val wallpaperLauncher = registerForActivityResult(
@@ -89,7 +89,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
 
         vm         = ViewModelProvider(this, AuraViewModel.Factory(application))[AuraViewModel::class.java]
-        widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
+        widgetHost = SafeAppWidgetHost(this, WIDGET_HOST_ID)
 
         setContent {
             val state by vm.state.collectAsStateWithLifecycle()

@@ -12,7 +12,7 @@ jobs:
     name: Build APK
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # required to create releases and upload assets
+      contents: write
 
     steps:
       - name: Checkout
@@ -31,7 +31,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          ./gradlew assembleDebug --no-daemon \
+            -PversionCode=${{ github.run_number }} \
+            -PversionName=1.0.${{ github.run_number }}
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
@@ -57,16 +60,18 @@ jobs:
         run: |
           printf 'storeFile=../aura.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
             "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -PversionCode=${{ github.run_number }} \
+            -PversionName=1.0.${{ github.run_number }}
 
       # ── New versioned release on every push to main ───────────────────────
       - name: Create release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name:   v0.${{ github.run_number }}
-          name:       "Build #${{ github.run_number }}"
-          prerelease: true
+          tag_name:   v1.0.${{ github.run_number }}
+          name:       "v1.0.${{ github.run_number }}"
+          prerelease: false
           body: |
             **Commit:** ${{ github.sha }}
             **Message:** ${{ github.event.head_commit.message }}
@@ -74,7 +79,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Stable versioned release on manual tag (e.g. v1.0.0) ─────────────
+      # ── Stable versioned release on manual tag (e.g. v2.0.0) ─────────────
       - name: Create stable release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
