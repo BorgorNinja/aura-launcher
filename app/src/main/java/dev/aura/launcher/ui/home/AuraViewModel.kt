@@ -9,12 +9,15 @@ import dev.aura.launcher.data.model.AuraSettings
 import dev.aura.launcher.data.repository.AppRepository
 import dev.aura.launcher.data.repository.SettingsRepository
 import dev.aura.launcher.ui.navigation.NavigationTab
+import dev.aura.launcher.util.IconCache
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -26,14 +29,15 @@ import kotlinx.coroutines.launch
 // ─── State ───────────────────────────────────────────────────────────────────
 
 data class AuraUiState(
-    val selectedTab:   NavigationTab = NavigationTab.HOME,
-    val apps:          List<AppInfo> = emptyList(),
-    val dockApps:      List<AppInfo> = emptyList(),
-    val searchQuery:   String        = "",
-    val searchResults: List<AppInfo> = emptyList(),
-    val isSearching:   Boolean       = false,
-    val settings:      AuraSettings  = AuraSettings(),
-    val widgetIds:     List<Int>     = emptyList()
+    val selectedTab:    NavigationTab    = NavigationTab.HOME,
+    val apps:           List<AppInfo>    = emptyList(),
+    val dockSlots:      List<AppInfo?>   = listOf(null, null, null, null),
+    val pendingDockAdd: AppInfo?         = null,    // app waiting to be placed in a dock slot
+    val searchQuery:    String           = "",
+    val searchResults:  List<AppInfo>    = emptyList(),
+    val isSearching:    Boolean          = false,
+    val settings:       AuraSettings     = AuraSettings(),
+    val widgetIds:      List<Int>        = emptyList()
 )
 
 // ─── Side effects ─────────────────────────────────────────────────────────────
@@ -46,21 +50,26 @@ sealed interface SideEffect {
 // ─── Events ──────────────────────────────────────────────────────────────────
 
 sealed interface AuraEvent {
-    data class SelectTab(val tab: NavigationTab)       : AuraEvent
-    data class Search(val query: String)               : AuraEvent
-    data class Launch(val packageName: String)         : AuraEvent
-    data class Uninstall(val packageName: String)      : AuraEvent
-    data class ShowAppInfo(val packageName: String)    : AuraEvent
-    data class SetGridColumns(val columns: Int)        : AuraEvent
-    data class SetDarkTheme(val mode: String)          : AuraEvent
-    data class SetNotifDots(val enabled: Boolean)      : AuraEvent
-    data class AddWidget(val id: Int)                  : AuraEvent
-    data class RemoveWidget(val id: Int)               : AuraEvent
-    data class SetSwipeDownAction(val action: String)  : AuraEvent
-    data class SetDoubleTapAction(val action: String)  : AuraEvent
-    data object ClearSearch                            : AuraEvent
-    data object PickWallpaper                          : AuraEvent
-    data object PickWidget                             : AuraEvent
+    data class SelectTab(val tab: NavigationTab)        : AuraEvent
+    data class Search(val query: String)                : AuraEvent
+    data class Launch(val packageName: String)          : AuraEvent
+    data class Uninstall(val packageName: String)       : AuraEvent
+    data class ShowAppInfo(val packageName: String)     : AuraEvent
+    data class SetGridColumns(val columns: Int)         : AuraEvent
+    data class SetDarkTheme(val mode: String)           : AuraEvent
+    data class SetNotifDots(val enabled: Boolean)       : AuraEvent
+    data class AddWidget(val id: Int)                   : AuraEvent
+    data class RemoveWidget(val id: Int)                : AuraEvent
+    data class SetSwipeDownAction(val action: String)   : AuraEvent
+    data class SetDoubleTapAction(val action: String)   : AuraEvent
+    // Dock management
+    data class StartDockAdd(val app: AppInfo)           : AuraEvent  // from drawer long-press
+    data class PlaceDockApp(val slotIndex: Int)         : AuraEvent  // tap vacant slot
+    data class RemoveFromDock(val slotIndex: Int)       : AuraEvent
+    data object CancelDockAdd                           : AuraEvent
+    data object ClearSearch                             : AuraEvent
+    data object PickWallpaper                           : AuraEvent
+    data object PickWidget                              : AuraEvent
 }
 
 // ─── ViewModel ───────────────────────────────────────────────────────────────
@@ -70,6 +79,7 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
 
     private val appRepo      = AppRepository(app)
     private val settingsRepo = SettingsRepository(app)
+    private val pm           = app.packageManager
 
     private val _state       = MutableStateFlow(AuraUiState())
     val state: StateFlow<AuraUiState> = _state
@@ -80,11 +90,23 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     private val _query = MutableStateFlow("")
 
     init {
+        // Apps list
         appRepo.allApps.onEach { list ->
-            _state.update { it.copy(
-                apps     = list,
-                dockApps = list.sortedByDescending { a -> a.launchCount }.take(4)
-            )}
+            _state.update { it.copy(apps = list) }
+            // Pre-warm the icon cache so drawer scrolling is smooth.
+            // Runs entirely on Dispatchers.IO — never blocks the main thread.
+            viewModelScope.launch(Dispatchers.IO) {
+                IconCache.preload(list.map { it.packageName }, pm)
+            }
+        }.launchIn(viewModelScope)
+
+        // Dock slots — combine app list with saved dock packages so slot
+        // objects stay in sync when apps are installed/uninstalled
+        combine(appRepo.allApps, settingsRepo.dockSlots) { apps, pkgSlots ->
+            val map = apps.associateBy { it.packageName }
+            pkgSlots.map { pkg -> if (pkg == null) null else map[pkg] }
+        }.onEach { slots ->
+            _state.update { it.copy(dockSlots = slots) }
         }.launchIn(viewModelScope)
 
         settingsRepo.settings.onEach { s ->
@@ -114,7 +136,6 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(searchQuery = "", isSearching = false, searchResults = emptyList()) }
             }
             is AuraEvent.Launch             -> viewModelScope.launch { appRepo.launch(getApplication(), event.packageName) }
-            // Uninstall: call repo directly — avoids SharedFlow timing issues and uses proper FLAG_ACTIVITY_NEW_TASK
             is AuraEvent.Uninstall          -> viewModelScope.launch { appRepo.uninstall(getApplication(), event.packageName) }
             is AuraEvent.ShowAppInfo        -> viewModelScope.launch { appRepo.openAppInfo(getApplication(), event.packageName) }
             AuraEvent.PickWallpaper         -> viewModelScope.launch { _sideEffects.emit(SideEffect.PickWallpaper) }
@@ -126,6 +147,17 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
             is AuraEvent.SetNotifDots       -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
             is AuraEvent.SetSwipeDownAction -> viewModelScope.launch { settingsRepo.setSwipeDownAction(event.action) }
             is AuraEvent.SetDoubleTapAction -> viewModelScope.launch { settingsRepo.setDoubleTapAction(event.action) }
+            // Dock
+            is AuraEvent.StartDockAdd       -> _state.update {
+                it.copy(pendingDockAdd = event.app, selectedTab = NavigationTab.HOME)
+            }
+            is AuraEvent.PlaceDockApp       -> {
+                val pending = _state.value.pendingDockAdd ?: return
+                _state.update { it.copy(pendingDockAdd = null) }
+                viewModelScope.launch { settingsRepo.setDockSlot(event.slotIndex, pending.packageName) }
+            }
+            is AuraEvent.RemoveFromDock     -> viewModelScope.launch { settingsRepo.setDockSlot(event.slotIndex, null) }
+            AuraEvent.CancelDockAdd         -> _state.update { it.copy(pendingDockAdd = null) }
         }
     }
 

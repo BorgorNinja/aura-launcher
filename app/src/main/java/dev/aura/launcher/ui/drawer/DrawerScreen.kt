@@ -61,47 +61,40 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun DrawerScreen(
-    state:         AuraUiState,
-    onEvent:       (AuraEvent) -> Unit,
-    bottomPadding: androidx.compose.foundation.layout.WindowInsets = androidx.compose.foundation.layout.WindowInsets(0)
+    state:   AuraUiState,
+    onEvent: (AuraEvent) -> Unit
 ) {
     val displayList = if (state.isSearching) state.searchResults else state.apps
     val columns     = state.settings.gridColumns
 
-    // Group for alphabetical index (only when not searching)
-    val grouped: Map<Char, List<AppInfo>> = remember(displayList, state.isSearching) {
+    val grouped = remember(displayList, state.isSearching) {
         if (state.isSearching) emptyMap()
-        else displayList.groupBy { it.label.firstOrNull()?.uppercaseChar() ?: '#' }
-            .toSortedMap()
+        else displayList.groupBy { it.label.firstOrNull()?.uppercaseChar() ?: '#' }.toSortedMap()
     }
-
-    val letters       = remember(grouped) { grouped.keys.toList() }
-    val gridState     = rememberLazyGridState()
+    val letters        = remember(grouped) { grouped.keys.toList() }
+    val gridState      = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Map letter → first grid item index (header + items)
-    val letterPositions = remember(grouped, columns) {
+    val letterPositions = remember(grouped) {
         val positions = mutableMapOf<Char, Int>()
         var pos = 0
         grouped.forEach { (letter, apps) ->
             positions[letter] = pos
-            pos += 1 + apps.size  // 1 header + N apps
+            pos += 1 + apps.size
         }
         positions
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color    = MaterialTheme.colorScheme.background
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-        ) {
+    // Precompute dock state once — avoids recalculating inside each item
+    val dockPackages = remember(state.dockSlots) {
+        state.dockSlots.mapNotNull { it?.packageName }.toSet()
+    }
+    val dockFull = state.dockSlots.all { it != null }
+
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             Spacer(Modifier.height(8.dp))
 
-            // ── Search bar ──────────────────────────────────────────
             OutlinedTextField(
                 value         = state.searchQuery,
                 onValueChange = { onEvent(AuraEvent.Search(it)) },
@@ -121,44 +114,39 @@ fun DrawerScreen(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     unfocusedBorderColor    = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                 ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             )
 
             Spacer(Modifier.height(8.dp))
 
-            // ── Grid + Alpha index ───────────────────────────────────
             Box(modifier = Modifier.weight(1f)) {
                 LazyVerticalGrid(
                     columns        = GridCells.Fixed(columns),
                     state          = gridState,
-                    contentPadding = PaddingValues(
-                        start  = 8.dp,
-                        end    = 28.dp,  // leave room for alpha index
-                        top    = 4.dp,
-                        bottom = 80.dp
-                    ),
+                    contentPadding = PaddingValues(start = 8.dp, end = 28.dp, top = 4.dp, bottom = 80.dp),
                     verticalArrangement   = Arrangement.spacedBy(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     if (state.isSearching) {
-                        items(displayList, key = { it.packageName }) { app ->
+                        items(
+                            items       = displayList,
+                            key         = { it.packageName },
+                            contentType = { "app" }
+                        ) { app ->
                             AppGridItem(
                                 app         = app,
+                                inDock      = app.packageName in dockPackages,
+                                dockFull    = dockFull,
                                 onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
                                 onUninstall = { onEvent(AuraEvent.Uninstall(app.packageName)) },
-                                onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) }
+                                onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) },
+                                onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) }
                             )
                         }
                     } else {
                         grouped.forEach { (letter, apps) ->
-                            // Section header — spans full row
-                            item(
-                                key  = "header_$letter",
-                                span = { GridItemSpan(maxLineSpan) }
-                            ) {
+                            item(key = "header_$letter", span = { GridItemSpan(maxLineSpan) }) {
                                 Text(
                                     text     = letter.toString(),
                                     style    = MaterialTheme.typography.labelLarge.copy(
@@ -168,20 +156,26 @@ fun DrawerScreen(
                                     modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp)
                                 )
                             }
-
-                            items(apps, key = { it.packageName }) { app ->
+                            items(
+                                items       = apps,
+                                key         = { it.packageName },
+                                contentType = { "app" }
+                            ) { app ->
                                 AppGridItem(
                                     app         = app,
+                                    inDock      = app.packageName in dockPackages,
+                                    dockFull    = dockFull,
                                     onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
                                     onUninstall = { onEvent(AuraEvent.Uninstall(app.packageName)) },
-                                    onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) }
+                                    onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) },
+                                    onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) }
                                 )
                             }
                         }
                     }
                 }
 
-                // ── Alphabetical scroll index (right side) ────────────
+                // Alphabetical scroll index
                 if (!state.isSearching && letters.isNotEmpty()) {
                     Column(
                         modifier = Modifier
@@ -192,8 +186,8 @@ fun DrawerScreen(
                             .pointerInput(letters) {
                                 detectTapGestures { offset ->
                                     val fraction = (offset.y / size.height).coerceIn(0f, 1f)
-                                    val idx      = (fraction * letters.size).toInt().coerceIn(0, letters.lastIndex)
-                                    val pos      = letterPositions[letters[idx]] ?: return@detectTapGestures
+                                    val idx = (fraction * letters.size).toInt().coerceIn(0, letters.lastIndex)
+                                    val pos = letterPositions[letters[idx]] ?: return@detectTapGestures
                                     coroutineScope.launch { gridState.animateScrollToItem(pos) }
                                 }
                             },
@@ -217,15 +211,16 @@ fun DrawerScreen(
     }
 }
 
-// ─── App Grid Item ────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppGridItem(
-    app:        AppInfo,
-    onClick:    () -> Unit,
+    app:         AppInfo,
+    inDock:      Boolean,
+    dockFull:    Boolean,
+    onClick:     () -> Unit,
     onUninstall: () -> Unit,
-    onAppInfo:   () -> Unit
+    onAppInfo:   () -> Unit,
+    onAddToDock: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val icon: ImageBitmap? = rememberAppIcon(app.packageName)
@@ -261,13 +256,26 @@ fun AppGridItem(
             )
         }
 
-        DropdownMenu(
-            expanded         = menuExpanded,
-            onDismissRequest = { menuExpanded = false }
-        ) {
-            DropdownMenuItem(text = { Text("Open")     }, onClick = { menuExpanded = false; onClick() })
-            DropdownMenuItem(text = { Text("App info") }, onClick = { menuExpanded = false; onAppInfo() })
-            DropdownMenuItem(text = { Text("Uninstall")}, onClick = { menuExpanded = false; onUninstall() })
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text    = { Text("Open") },
+                onClick = { menuExpanded = false; onClick() }
+            )
+            DropdownMenuItem(
+                text    = { Text("App info") },
+                onClick = { menuExpanded = false; onAppInfo() }
+            )
+            DropdownMenuItem(
+                text    = { Text("Uninstall") },
+                onClick = { menuExpanded = false; onUninstall() }
+            )
+            // Show "Add to Dock" only when there's a free slot and app isn't already docked
+            if (!inDock && !dockFull) {
+                DropdownMenuItem(
+                    text    = { Text("Add to Dock") },
+                    onClick = { menuExpanded = false; onAddToDock() }
+                )
+            }
         }
     }
 }
