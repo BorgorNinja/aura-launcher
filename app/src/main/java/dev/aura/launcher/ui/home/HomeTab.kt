@@ -363,15 +363,19 @@ private fun OccupiedDockSlot(
 
 @Composable
 private fun VacantDockSlot(highlighted: Boolean, onTap: (() -> Unit)?) {
-    val pulse by rememberInfiniteTransition(label = "dock_pulse").animateFloat(
-        initialValue = 0.4f,
-        targetValue  = 1f,
-        animationSpec = if (highlighted) infiniteRepeatable(
-            animation  = tween(600, easing = EaseInOut),
-            repeatMode = RepeatMode.Reverse
-        ) else tween(0),
-        label = "pulse_alpha"
+    // animateFloat on InfiniteTransition MUST use InfiniteRepeatableSpec.
+    // When not in placement mode we skip the animation entirely and use a fixed alpha.
+    val pulseSpec = infiniteRepeatable<Float>(
+        animation  = tween(600, easing = EaseInOut),
+        repeatMode = RepeatMode.Reverse
     )
+    val animatedPulse by rememberInfiniteTransition(label = "dock_pulse").animateFloat(
+        initialValue  = 0.4f,
+        targetValue   = 1f,
+        animationSpec = pulseSpec,
+        label         = "pulse_alpha"
+    )
+    val pulse = if (highlighted) animatedPulse else 0.3f
 
     Box(
         contentAlignment = Alignment.Center,
