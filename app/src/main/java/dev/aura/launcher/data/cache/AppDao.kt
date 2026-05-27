@@ -13,10 +13,6 @@ interface AppDao {
     @Query("SELECT * FROM app_index ORDER BY label ASC")
     fun observeAll(): Flow<List<AppInfo>>
 
-    /**
-     * Ranked search — exact prefix match scored highest, then substring.
-     * Runs entirely in SQLite with no FTS5 extension required.
-     */
     @Query("""
         SELECT * FROM app_index
         WHERE label LIKE :prefix || '%'
@@ -35,8 +31,13 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(apps: List<AppInfo>)
 
+    /** Remove all rows whose package is not in the active list. */
     @Query("DELETE FROM app_index WHERE packageName NOT IN (:active)")
     suspend fun pruneUninstalled(active: List<String>)
+
+    /** Delete a single package — used when an app is uninstalled. */
+    @Query("DELETE FROM app_index WHERE packageName = :pkg")
+    suspend fun delete(pkg: String)
 
     @Query("""
         UPDATE app_index

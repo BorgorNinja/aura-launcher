@@ -2,6 +2,7 @@ package dev.aura.launcher
 
 import android.Manifest
 import android.app.WallpaperManager
+import dev.aura.launcher.data.cache.AppIndexCache
 import dev.aura.launcher.widget.SafeAppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.Intent
@@ -130,6 +131,16 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         runCatching { widgetHost.startListening() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-scan the installed package list every time the launcher comes to the
+        // foreground. This catches apps installed or uninstalled while the launcher
+        // process was alive but the PackageChangeReceiver didn't fire (e.g. race
+        // conditions, or apps installed via ADB while the screen was off).
+        // warmAsync is idempotent and runs entirely on Dispatchers.IO.
+        AppIndexCache.warmAsync(this)
     }
 
     override fun onStop() {
