@@ -6,7 +6,7 @@ import android.content.Intent
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -32,10 +32,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -50,9 +52,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -88,13 +90,13 @@ fun executeGestureAction(context: Context, action: String) {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
-        "clock"     -> runCatching {
+        "clock"         -> runCatching {
             context.startActivity(
                 Intent(AlarmClock.ACTION_SHOW_ALARMS)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
-        "assistant" -> runCatching {
+        "assistant"     -> runCatching {
             context.startActivity(
                 Intent(Intent.ACTION_VOICE_COMMAND)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -107,12 +109,11 @@ fun executeGestureAction(context: Context, action: String) {
 
 @Composable
 fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
-    val context  = LocalContext.current
-    val settings = state.settings
+    val context         = LocalContext.current
+    val settings        = state.settings
     var dragY by remember { mutableFloatStateOf(0f) }
     val inPlacementMode = state.pendingDockAdd != null
 
-    // Back press during placement mode cancels the dock-add flow
     BackHandler(enabled = inPlacementMode) { onEvent(AuraEvent.CancelDockAdd) }
 
     Box(
@@ -143,7 +144,6 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
         ) {
             Spacer(Modifier.height(12.dp))
 
-            // Search pill — tapping opens the drawer
             if (!inPlacementMode) {
                 SearchPill(
                     onClick  = { onEvent(AuraEvent.SelectTab(NavigationTab.APPS)) },
@@ -153,7 +153,6 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
-            // Placement mode banner
             if (inPlacementMode) {
                 PlacementBanner(appName = state.pendingDockAdd?.label ?: "")
                 Spacer(Modifier.height(12.dp))
@@ -164,18 +163,18 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
             Spacer(Modifier.weight(1f))
 
             DockRow(
-                slots              = state.dockSlots,
-                pendingAdd         = state.pendingDockAdd,
-                onLaunch           = { onEvent(AuraEvent.Launch(it)) },
-                onRemoveFromDock   = { onEvent(AuraEvent.RemoveFromDock(it)) },
-                onSlotTap          = { onEvent(AuraEvent.PlaceDockApp(it)) },
+                slots                 = state.dockSlots,
+                pendingAdd            = state.pendingDockAdd,
+                onLaunch              = { onEvent(AuraEvent.Launch(it)) },
+                onRemoveFromDock      = { onEvent(AuraEvent.RemoveFromDock(it)) },
+                onSlotTap             = { onEvent(AuraEvent.PlaceDockApp(it)) },
                 onLongPressBackground = { onEvent(AuraEvent.PickWallpaper) }
             )
         }
     }
 }
 
-// ─── Placement banner ─────────────────────────────────────────────────────────
+// ─── Placement mode banner ────────────────────────────────────────────────────
 
 @Composable
 private fun PlacementBanner(appName: String) {
@@ -190,12 +189,12 @@ private fun PlacementBanner(appName: String) {
             modifier            = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
             Text(
-                "Adding "$appName" to Dock",
+                text  = "Adding \u201c$appName\u201d to Dock",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Tap a glowing slot below to place it,\nor press Back to cancel.",
+                text      = "Tap a glowing slot to place it, or press Back to cancel.",
                 style     = MaterialTheme.typography.bodySmall.copy(
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
                 ),
@@ -221,18 +220,22 @@ private fun SearchPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.Start,
             modifier              = Modifier.padding(horizontal = 16.dp)
         ) {
-            Icon(Icons.Default.Add, null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp))
-            Spacer(Modifier.padding(start = 8.dp))
-            Text("Search apps & web",
+            Icon(
+                imageVector        = Icons.Default.Search,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text  = "Search apps & web",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
-// ─── Clock ───────────────────────────────────────────────────────────────────
+// ─── Clock ────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun ClockBlock() {
@@ -240,10 +243,18 @@ private fun ClockBlock() {
     val time = remember { SimpleDateFormat("HH:mm",       Locale.getDefault()).format(now) }
     val date = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(time, style = MaterialTheme.typography.displayLarge.copy(
-            fontWeight = FontWeight.Light, fontSize = 80.sp, color = Color.White))
-        Text(date, style = MaterialTheme.typography.titleMedium.copy(
-            color = Color.White.copy(alpha = 0.8f)))
+        Text(
+            text  = time,
+            style = MaterialTheme.typography.displayLarge.copy(
+                fontWeight = FontWeight.Light, fontSize = 80.sp, color = Color.White
+            )
+        )
+        Text(
+            text  = date,
+            style = MaterialTheme.typography.titleMedium.copy(
+                color = Color.White.copy(alpha = 0.8f)
+            )
+        )
     }
 }
 
@@ -284,7 +295,7 @@ private fun DockRow(
                     OccupiedDockSlot(
                         app              = app,
                         dimmed           = pendingAdd != null,
-                        onClick          = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
+                        onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
                         onRemoveFromDock = { onRemoveFromDock(index) }
                     )
                 } else {
@@ -298,29 +309,30 @@ private fun DockRow(
     }
 }
 
-// ─── Occupied slot ────────────────────────────────────────────────────────────
+// ─── Occupied dock slot ───────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun OccupiedDockSlot(
     app:              AppInfo,
     dimmed:           Boolean,
-    onClick:          (() -> Unit)?,
+    onLaunch:         (() -> Unit)?,
     onRemoveFromDock: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val icon = rememberAppIcon(app.packageName)
+    val icon     = rememberAppIcon(app.packageName)
+    val slotAlpha = if (dimmed) 0.35f else 1f
 
     Box {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .combinedClickable(
-                    onClick     = { onClick?.invoke() },
+                    onClick     = { onLaunch?.invoke() },
                     onLongClick = { showMenu = true }
                 )
                 .padding(4.dp)
-                .graphicsLayer { alpha = if (dimmed) 0.35f else 1f }
+                .alpha(slotAlpha)
         ) {
             if (icon != null) {
                 Image(
@@ -338,18 +350,21 @@ private fun OccupiedDockSlot(
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                app.label,
-                style    = MaterialTheme.typography.labelSmall.copy(color = Color.White),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text      = app.label,
+                style     = MaterialTheme.typography.labelSmall.copy(color = Color.White),
+                maxLines  = 1,
+                overflow  = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
         }
 
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        DropdownMenu(
+            expanded          = showMenu,
+            onDismissRequest  = { showMenu = false }
+        ) {
             DropdownMenuItem(
                 text    = { Text("Open") },
-                onClick = { showMenu = false; onClick?.invoke() }
+                onClick = { showMenu = false; onLaunch?.invoke() }
             )
             DropdownMenuItem(
                 text    = { Text("Remove from Dock") },
@@ -359,43 +374,42 @@ private fun OccupiedDockSlot(
     }
 }
 
-// ─── Vacant slot ──────────────────────────────────────────────────────────────
+// ─── Vacant dock slot ─────────────────────────────────────────────────────────
 
 @Composable
 private fun VacantDockSlot(highlighted: Boolean, onTap: (() -> Unit)?) {
-    // animateFloat on InfiniteTransition MUST use InfiniteRepeatableSpec.
-    // When not in placement mode we skip the animation entirely and use a fixed alpha.
-    val pulseSpec = infiniteRepeatable<Float>(
-        animation  = tween(600, easing = EaseInOut),
-        repeatMode = RepeatMode.Reverse
-    )
-    val animatedPulse by rememberInfiniteTransition(label = "dock_pulse").animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "dock_pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
         initialValue  = 0.4f,
         targetValue   = 1f,
-        animationSpec = pulseSpec,
-        label         = "pulse_alpha"
+        animationSpec = infiniteRepeatable(
+            animation  = tween(durationMillis = 700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
     )
-    val pulse = if (highlighted) animatedPulse else 0.3f
+
+    val borderAlpha  = if (highlighted) pulseAlpha else 0.3f
+    val borderWidth  = if (highlighted) 2.dp else 1.dp
+    val borderColor  = if (highlighted)
+        MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha)
+    else
+        MaterialTheme.colorScheme.outline.copy(alpha = borderAlpha)
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
+        modifier         = Modifier
             .size(52.dp)
             .clip(CircleShape)
-            .then(
-                if (highlighted)
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = pulse), CircleShape)
-                else
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), CircleShape)
-            )
+            .border(borderWidth, borderColor, CircleShape)
             .then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
     ) {
         if (highlighted) {
             Icon(
-                Icons.Default.Add,
+                imageVector        = Icons.Default.Add,
                 contentDescription = "Place here",
-                tint     = MaterialTheme.colorScheme.primary.copy(alpha = pulse),
-                modifier = Modifier.size(22.dp)
+                tint               = MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+                modifier           = Modifier.size(22.dp)
             )
         }
     }
