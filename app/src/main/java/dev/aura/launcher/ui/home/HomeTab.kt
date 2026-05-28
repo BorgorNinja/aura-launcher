@@ -3,6 +3,7 @@ package dev.aura.launcher.ui.home
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
@@ -45,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +68,7 @@ import dev.aura.launcher.data.model.AppInfo
 import dev.aura.launcher.service.LockScreenService
 import dev.aura.launcher.ui.navigation.NavigationTab
 import dev.aura.launcher.ui.util.rememberAppIcon
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -162,9 +165,13 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
+            // Hoist PackageManager here — one LocalContext.current lookup for
+            // all dock slots instead of one per OccupiedDockSlot composable.
+            val pm = LocalContext.current.packageManager
             DockRow(
                 slots                 = state.dockSlots,
                 pendingAdd            = state.pendingDockAdd,
+                pm                    = pm,
                 onLaunch              = { onEvent(AuraEvent.Launch(it)) },
                 onRemoveFromDock      = { onEvent(AuraEvent.RemoveFromDock(it)) },
                 onSlotTap             = { onEvent(AuraEvent.PlaceDockApp(it)) },
@@ -237,20 +244,41 @@ private fun SearchPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 // ─── Clock ────────────────────────────────────────────────────────────────────
 
+/**
+ * Live clock that updates every second.
+ *
+ * The `time` and `date` formatters are created once and reused — SimpleDateFormat
+ * construction is non-trivial (locale data lookup). The `LaunchedEffect(Unit)`
+ * coroutine runs for the lifetime of this composable; `delay(1_000)` yields the
+ * thread rather than spinning. Only `ClockBlock` recomposes each tick — the rest
+ * of HomeTab is unaffected because the mutableStateOf is scoped here.
+ */
 @Composable
 private fun ClockBlock() {
-    val now  = remember { Date() }
-    val time = remember { SimpleDateFormat("HH:mm",       Locale.getDefault()).format(now) }
-    val date = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now) }
+    var now by remember { mutableStateOf(Date()) }
+
+    // Tick every second. LaunchedEffect(Unit) means this runs once and lives
+    // as long as ClockBlock is in the composition.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            now = Date()
+        }
+    }
+
+    // Formatters are heavy; create once and reuse on each tick.
+    val timeFmt = remember { SimpleDateFormat("HH:mm",       Locale.getDefault()) }
+    val dateFmt = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()) }
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text  = time,
+            text  = timeFmt.format(now),
             style = MaterialTheme.typography.displayLarge.copy(
                 fontWeight = FontWeight.Light, fontSize = 80.sp, color = Color.White
             )
         )
         Text(
-            text  = date,
+            text  = dateFmt.format(now),
             style = MaterialTheme.typography.titleMedium.copy(
                 color = Color.White.copy(alpha = 0.8f)
             )
@@ -265,6 +293,7 @@ private fun ClockBlock() {
 private fun DockRow(
     slots:                List<AppInfo?>,
     pendingAdd:           AppInfo?,
+    pm:                   PackageManager,
     onLaunch:             (String) -> Unit,
     onRemoveFromDock:     (Int) -> Unit,
     onSlotTap:            (Int) -> Unit,
@@ -294,6 +323,7 @@ private fun DockRow(
                 if (app != null) {
                     OccupiedDockSlot(
                         app              = app,
+                        pm               = pm,
                         dimmed           = pendingAdd != null,
                         onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
                         onRemoveFromDock = { onRemoveFromDock(index) }
@@ -315,13 +345,13 @@ private fun DockRow(
 @Composable
 private fun OccupiedDockSlot(
     app:              AppInfo,
+    pm:               PackageManager,
     dimmed:           Boolean,
     onLaunch:         (() -> Unit)?,
     onRemoveFromDock: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val pm = LocalContext.current.packageManager
-    val icon = rememberAppIcon(app.packageName, pm)
+    val icon     = rememberAppIcon(app.packageName, pm)
     val slotAlpha = if (dimmed) 0.35f else 1f
 
     Box {
@@ -377,41 +407,58 @@ private fun OccupiedDockSlot(
 
 // ─── Vacant dock slot ─────────────────────────────────────────────────────────
 
+/**
+ * The infinite pulse animation is only created when [highlighted] is true
+ * (i.e. the user is in dock-placement mode).  When [highlighted] is false the
+ * composable renders a static border with no running animation — no frame
+ * callbacks, no recompositions, no GPU work — so the home screen is completely
+ * idle when the user is just looking at it normally.
+ */
 @Composable
 private fun VacantDockSlot(highlighted: Boolean, onTap: (() -> Unit)?) {
-    val infiniteTransition = rememberInfiniteTransition(label = "dock_pulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue  = 0.4f,
-        targetValue   = 1f,
-        animationSpec = infiniteRepeatable(
-            animation  = tween(durationMillis = 700, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
+    // Conditionally start the infinite transition only when it is actually
+    // needed.  Compose allows conditional composable calls; the slot table
+    // entry is recycled when highlighted toggles, which is fine here.
+    val borderAlpha: Float
+    val borderWidth = if (highlighted) 2.dp else 1.dp
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val outlineColor = MaterialTheme.colorScheme.outline
 
-    val borderAlpha  = if (highlighted) pulseAlpha else 0.3f
-    val borderWidth  = if (highlighted) 2.dp else 1.dp
-    val borderColor  = if (highlighted)
-        MaterialTheme.colorScheme.primary.copy(alpha = borderAlpha)
-    else
-        MaterialTheme.colorScheme.outline.copy(alpha = borderAlpha)
+    if (highlighted) {
+        val infiniteTransition = rememberInfiniteTransition(label = "dock_pulse")
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue  = 0.4f,
+            targetValue   = 1f,
+            animationSpec = infiniteRepeatable(
+                animation  = tween(durationMillis = 700, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse"
+        )
+        borderAlpha = pulseAlpha
 
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier         = Modifier
-            .size(52.dp)
-            .clip(CircleShape)
-            .border(borderWidth, borderColor, CircleShape)
-            .then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
-    ) {
-        if (highlighted) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier         = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .border(borderWidth, primaryColor.copy(alpha = borderAlpha), CircleShape)
+                .then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
+        ) {
             Icon(
                 imageVector        = Icons.Default.Add,
                 contentDescription = "Place here",
-                tint               = MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+                tint               = primaryColor.copy(alpha = borderAlpha),
                 modifier           = Modifier.size(22.dp)
             )
         }
+    } else {
+        // Static slot — no animation running, no frame callbacks scheduled.
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .border(borderWidth, outlineColor.copy(alpha = 0.3f), CircleShape)
+        )
     }
 }
