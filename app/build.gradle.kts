@@ -20,6 +20,8 @@ val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) load(FileInputStream(keystorePropsFile))
 }
+val hasKeystore = keystorePropsFile.exists() &&
+    keystoreProps.getProperty("storePassword", "").isNotEmpty()
 
 android {
     namespace   = "dev.aura.launcher"
@@ -60,13 +62,22 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-
-            // Ensures smooth 120Hz animations on cold start after CLI install.
         }
 
         debug {
-            applicationIdSuffix = ".debug"
-            isDebuggable        = true
+            // ⚠️  No applicationIdSuffix — keeps the same package name as release
+            // so every sideloaded build (debug or release) can update over an
+            // existing install without needing to uninstall first.
+            isDebuggable = true
+
+            // When the keystore is present (CI or local), sign debug with the same
+            // key as release so APK signatures always match across builds.
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            // If no keystore, Gradle falls back to the auto-generated debug key.
+            // In that case, first install requires a clean install; set up
+            // KEYSTORE_BASE64 in GitHub secrets to enable seamless updates.
         }
     }
 
