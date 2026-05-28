@@ -30,7 +30,58 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
+      # ── Signing keystore ──────────────────────────────────────────────────
+      # If KEYSTORE_BASE64 secret is set: decode and use it (consistent key →
+      # every APK can update over the previous install without uninstalling).
+      # If not set: generate a fresh keystore, sign with it, and upload it as
+      # an artifact named "SAVE-AS-KEYSTORE_BASE64-SECRET". Download it, run:
+      #   base64 -w 0 aura.jks
+      # then save the output as a repo secret called KEYSTORE_BASE64 so that
+      # all future builds reuse the same key and updates work seamlessly.
+      - name: Resolve or generate signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64:    ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD:  ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS:          ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:       ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > aura.jks
+            STORE_PASS="${KEYSTORE_PASSWORD}"
+            ALIAS="${KEY_ALIAS}"
+            KEY_PASS="${KEY_PASSWORD}"
+            echo "first_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  No KEYSTORE_BASE64 secret found — generating a one-time keystore."
+            echo "    After this run, download the 'SAVE-AS-KEYSTORE_BASE64-SECRET' artifact,"
+            echo "    base64-encode it, and save it as the KEYSTORE_BASE64 repo secret."
+            echo "    Also save KEYSTORE_PASSWORD=aura_debug, KEY_ALIAS=aura, KEY_PASSWORD=aura_debug."
+            keytool -genkeypair -v \
+              -keystore aura.jks \
+              -alias aura \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -storepass aura_debug -keypass aura_debug \
+              -dname "CN=Aura Launcher, O=AuraLauncher, C=US" \
+              -noprompt
+            STORE_PASS="aura_debug"
+            ALIAS="aura"
+            KEY_PASS="aura_debug"
+            echo "first_run=true" >> $GITHUB_OUTPUT
+          fi
+          printf 'storeFile=../aura.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$STORE_PASS" "$ALIAS" "$KEY_PASS" > keystore.properties
+
+      - name: Upload keystore for secret setup (first run only)
+        if: steps.keystore.outputs.first_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAVE-AS-KEYSTORE_BASE64-SECRET
+          path: aura.jks
+          retention-days: 30
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build Debug APK (signed)
         run: |
           ./gradlew assembleDebug --no-daemon \
             -PversionCode=${{ github.run_number }} \
@@ -43,29 +94,21 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      # ── Signed release (only when keystore secrets are set) ───────────────
-      - name: Decode Keystore
-        if: env.KEYSTORE_BASE64 != ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 --decode > aura.jks
-
-      - name: Build Release APK
-        if: env.KEYSTORE_BASE64 != ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Build Release APK (signed)
         run: |
-          printf 'storeFile=../aura.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
           ./gradlew assembleRelease --no-daemon \
             -PversionCode=${{ github.run_number }} \
             -PversionName=1.0.${{ github.run_number }}
 
-      # ── New versioned release on every push to main ───────────────────────
-      - name: Create release
+      - name: Upload Release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-launcher-release
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      # ── GitHub Release (push to main only) ───────────────────────────────
+      - name: Create GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
@@ -75,11 +118,16 @@ jobs:
           body: |
             **Commit:** ${{ github.sha }}
             **Message:** ${{ github.event.head_commit.message }}
-          files: app/build/outputs/apk/debug/*.apk
+
+            > ℹ️ Both APKs are signed with the same key — install either one and future builds will update over it seamlessly (no uninstall needed).
+            > If this is the very first build, download the `SAVE-AS-KEYSTORE_BASE64-SECRET` artifact and follow the instructions to lock in the signing key for all future builds.
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Stable versioned release on manual tag (e.g. v2.0.0) ─────────────
+      # ── Stable tag release ────────────────────────────────────────────────
       - name: Create stable release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
