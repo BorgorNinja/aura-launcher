@@ -2,17 +2,17 @@ package dev.aura.launcher
 
 import android.Manifest
 import android.app.WallpaperManager
-import dev.aura.launcher.data.cache.AppIndexCache
-import dev.aura.launcher.widget.SafeAppWidgetHost
-import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.WindowManager
+import android.appwidget.AppWidgetManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -23,12 +23,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import dev.aura.launcher.data.cache.AppIndexCache
 import dev.aura.launcher.ui.MainScreen
 import dev.aura.launcher.ui.home.AuraEvent
 import dev.aura.launcher.ui.home.AuraViewModel
 import dev.aura.launcher.ui.home.SideEffect
 import dev.aura.launcher.ui.navigation.NavigationTab
 import dev.aura.launcher.ui.theme.AuraTheme
+import dev.aura.launcher.widget.LocalWidgetHost
+import dev.aura.launcher.widget.SafeAppWidgetHost
 import dev.aura.launcher.widget.WIDGET_HOST_ID
 import dev.aura.launcher.widget.widgetPickerIntent
 import kotlinx.coroutines.launch
@@ -50,6 +53,16 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) openGallery() }
+
+    // ── Startup permission chain ──────────────────────────────────────────────
+    // Step 1: request media/storage permission
+    // Step 2: after that resolves, request battery optimization exemption
+    private val startupPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // Media permission result handled; proceed to battery optimization
+        requestBatteryOptimizationExemption()
+    }
 
     // ── Widget picker ─────────────────────────────────────────────────────────
     private val widgetPickerLauncher = registerForActivityResult(
@@ -119,6 +132,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // Request media/files permissions and battery optimization on first launch
+        requestStartupPermissions()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -135,17 +151,63 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-scan the installed package list every time the launcher comes to the
-        // foreground. This catches apps installed or uninstalled while the launcher
-        // process was alive but the PackageChangeReceiver didn't fire (e.g. race
-        // conditions, or apps installed via ADB while the screen was off).
-        // warmAsync is idempotent and runs entirely on Dispatchers.IO.
         AppIndexCache.warmAsync(this)
     }
 
     override fun onStop() {
         super.onStop()
         runCatching { widgetHost.stopListening() }
+    }
+
+    // ── Startup permission flow ───────────────────────────────────────────────
+
+    /**
+     * Called once on first launch (and any time permissions are still missing).
+     * Requests media/storage permissions as a batch, then chains into the
+     * battery optimization prompt once that resolves.
+     */
+    private fun requestStartupPermissions() {
+        val needed = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+ — granular media permissions
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
+                needed += Manifest.permission.READ_MEDIA_IMAGES
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED)
+                needed += Manifest.permission.READ_MEDIA_VIDEO
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                needed += Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            // Android 12 and below
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+                needed += Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+        if (needed.isNotEmpty()) {
+            startupPermissionLauncher.launch(needed.toTypedArray())
+        } else {
+            // Permissions already granted — go straight to battery optimization
+            requestBatteryOptimizationExemption()
+        }
+    }
+
+    /**
+     * Asks the user to exempt Aura Launcher from battery optimization.
+     * This prevents Android from killing the launcher process in the background,
+     * which can cause widget updates and notification dots to stop working.
+     * Only shown when not already exempted.
+     */
+    private fun requestBatteryOptimizationExemption() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                )
+            }
+        }
     }
 
     // ── Wallpaper ─────────────────────────────────────────────────────────────
