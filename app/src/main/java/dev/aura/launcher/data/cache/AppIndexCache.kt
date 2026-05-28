@@ -11,11 +11,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * AppIndexCache — builds and maintains the Room app index.
  *
- * warmAsync()       : full scan on startup (runs once on Application.onCreate)
+ * warmAsync()       : debounced full scan (safe to call on every onResume)
  * indexPackage()    : upsert a single newly-installed / updated package
  * removePackage()   : delete a single uninstalled package
  *
@@ -25,9 +26,28 @@ object AppIndexCache {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Minimum time between full scans.  Single-package changes (install /
+     * uninstall) are handled immediately by indexPackage() / removePackage()
+     * via the PackageChangeReceiver, so the full scan is purely a safety net
+     * for edge cases (ADB installs, system app updates) — it does not need to
+     * run on every onResume.
+     */
+    private const val FULL_SCAN_DEBOUNCE_MS = 30_000L
+    private val lastFullScanMs = AtomicLong(0L)
+
     // ── Full scan ─────────────────────────────────────────────────────────────
 
+    /**
+     * Schedules a full app-list scan if at least [FULL_SCAN_DEBOUNCE_MS] has
+     * elapsed since the previous scan.  Safe to call on every onResume; the
+     * guard prevents the expensive queryIntentActivities() disk read from
+     * running on every home-button press.
+     */
     fun warmAsync(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastFullScanMs.get() < FULL_SCAN_DEBOUNCE_MS) return
+        lastFullScanMs.set(now)
         scope.launch { fullScan(context) }
     }
 
@@ -38,7 +58,13 @@ object AppIndexCache {
         val intent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
-        val resolved = pm.queryIntentActivities(intent, PackageManager.GET_META_DATA)
+
+        // No GET_META_DATA — we only need the label and package name, not the
+        // full APK metadata bundle.  GET_META_DATA forces a read of every app's
+        // AndroidManifest metadata from disk, which is the main cost of this
+        // call. Removing it cuts query time significantly on devices with many
+        // installed apps.
+        val resolved = pm.queryIntentActivities(intent, 0)
 
         val apps = resolved.mapNotNull { ri ->
             runCatching { buildAppInfo(pm, ri.activityInfo.applicationInfo) }.getOrNull()
@@ -50,22 +76,13 @@ object AppIndexCache {
 
     // ── Single-package install / update ───────────────────────────────────────
 
-    /**
-     * Called by PackageChangeReceiver when ACTION_PACKAGE_ADDED or
-     * ACTION_PACKAGE_REPLACED is received. Upserts the app and evicts its
-     * cached icon so the fresh icon is loaded on next render.
-     */
     fun indexPackage(context: Context, packageName: String) {
         scope.launch {
             runCatching {
                 val pm = context.packageManager
-
-                // Only index apps that have a launcher entry (skips libraries, services, etc.)
-                val launchIntent = pm.getLaunchIntentForPackage(packageName) ?: return@launch
-
+                pm.getLaunchIntentForPackage(packageName) ?: return@launch
                 val ai  = pm.getApplicationInfo(packageName, 0)
                 val app = buildAppInfo(pm, ai)
-
                 AppDatabase.get(context).appDao().upsertAll(listOf(app))
                 IconCache.evict(packageName)
             }
@@ -74,10 +91,6 @@ object AppIndexCache {
 
     // ── Single-package uninstall ──────────────────────────────────────────────
 
-    /**
-     * Called by PackageChangeReceiver when ACTION_PACKAGE_REMOVED is received
-     * (and the removal is not part of a package replacement/update).
-     */
     fun removePackage(context: Context, packageName: String) {
         scope.launch {
             runCatching {
