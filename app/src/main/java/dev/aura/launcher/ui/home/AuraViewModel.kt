@@ -1,6 +1,7 @@
 package dev.aura.launcher.ui.home
 
 import android.app.Application
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -28,11 +29,24 @@ import kotlinx.coroutines.launch
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+/**
+ * @Immutable tells the Compose compiler that every publicly observable property
+ * of AuraUiState is fixed after construction — we always replace the whole
+ * object via StateFlow.update{}, never mutate it in place.
+ *
+ * Without this annotation the compiler sees List<AppInfo> fields and conservatively
+ * marks AuraUiState as UNSTABLE, forcing every composable that reads `state` to
+ * recompose on ANY state change — even unrelated ones (e.g. a dock slot change
+ * recomposing the search bar). With @Immutable, Compose can skip recomposing
+ * stable child composables whose inputs haven't changed, which eliminates a large
+ * class of redundant work across DrawerScreen, HomeTab, and MainScreen.
+ */
+@Immutable
 data class AuraUiState(
     val selectedTab:    NavigationTab    = NavigationTab.HOME,
     val apps:           List<AppInfo>    = emptyList(),
     val dockSlots:      List<AppInfo?>   = listOf(null, null, null, null),
-    val pendingDockAdd: AppInfo?         = null,    // app waiting to be placed in a dock slot
+    val pendingDockAdd: AppInfo?         = null,
     val searchQuery:    String           = "",
     val searchResults:  List<AppInfo>    = emptyList(),
     val isSearching:    Boolean          = false,
@@ -63,8 +77,8 @@ sealed interface AuraEvent {
     data class SetSwipeDownAction(val action: String)   : AuraEvent
     data class SetDoubleTapAction(val action: String)   : AuraEvent
     // Dock management
-    data class StartDockAdd(val app: AppInfo)           : AuraEvent  // from drawer long-press
-    data class PlaceDockApp(val slotIndex: Int)         : AuraEvent  // tap vacant slot
+    data class StartDockAdd(val app: AppInfo)           : AuraEvent
+    data class PlaceDockApp(val slotIndex: Int)         : AuraEvent
     data class RemoveFromDock(val slotIndex: Int)       : AuraEvent
     data object CancelDockAdd                           : AuraEvent
     data object ClearSearch                             : AuraEvent
@@ -90,18 +104,13 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     private val _query = MutableStateFlow("")
 
     init {
-        // Apps list
         appRepo.allApps.onEach { list ->
             _state.update { it.copy(apps = list) }
-            // Pre-warm the icon cache so drawer scrolling is smooth.
-            // Runs entirely on Dispatchers.IO — never blocks the main thread.
             viewModelScope.launch(Dispatchers.IO) {
                 IconCache.preload(list.map { it.packageName }, pm)
             }
         }.launchIn(viewModelScope)
 
-        // Dock slots — combine app list with saved dock packages so slot
-        // objects stay in sync when apps are installed/uninstalled
         combine(appRepo.allApps, settingsRepo.dockSlots) { apps, pkgSlots ->
             val map = apps.associateBy { it.packageName }
             pkgSlots.map { pkg -> if (pkg == null) null else map[pkg] }
@@ -127,8 +136,6 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
     fun onEvent(event: AuraEvent) {
         when (event) {
             is AuraEvent.SelectTab          -> {
-                // When navigating to Home, clear any active search so the
-                // search bar is empty and the app grid is fully restored.
                 if (event.tab == NavigationTab.HOME) {
                     _query.value = ""
                     _state.update {
@@ -163,7 +170,6 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
             is AuraEvent.SetNotifDots       -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
             is AuraEvent.SetSwipeDownAction -> viewModelScope.launch { settingsRepo.setSwipeDownAction(event.action) }
             is AuraEvent.SetDoubleTapAction -> viewModelScope.launch { settingsRepo.setDoubleTapAction(event.action) }
-            // Dock
             is AuraEvent.StartDockAdd       -> _state.update {
                 it.copy(pendingDockAdd = event.app, selectedTab = NavigationTab.HOME)
             }
