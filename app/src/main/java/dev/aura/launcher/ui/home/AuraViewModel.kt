@@ -126,7 +126,23 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onEvent(event: AuraEvent) {
         when (event) {
-            is AuraEvent.SelectTab          -> _state.update { it.copy(selectedTab = event.tab) }
+            is AuraEvent.SelectTab          -> {
+                // When navigating to Home, clear any active search so the
+                // search bar is empty and the app grid is fully restored.
+                if (event.tab == NavigationTab.HOME) {
+                    _query.value = ""
+                    _state.update {
+                        it.copy(
+                            selectedTab   = event.tab,
+                            searchQuery   = "",
+                            isSearching   = false,
+                            searchResults = emptyList()
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(selectedTab = event.tab) }
+                }
+            }
             is AuraEvent.Search             -> {
                 _query.value = event.query
                 _state.update { it.copy(searchQuery = event.query, isSearching = event.query.isNotBlank()) }
