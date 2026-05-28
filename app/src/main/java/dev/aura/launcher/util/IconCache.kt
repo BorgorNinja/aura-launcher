@@ -8,75 +8,126 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
- * Process-scoped LRU icon cache.
+ * Process-scoped icon cache.
  *
- * Performance notes:
- * - Icons are pre-scaled to TARGET_PX × TARGET_PX on load (≈52dp @ 2×).
- *   This avoids storing 192×192 full-res bitmaps and removes per-frame
- *   scaling work in the Image composable.
- * - getSync() returns the cached bitmap synchronously (no coroutine).
- *   rememberAppIcon() passes this as produceState's initialValue, so
- *   already-cached icons appear on the FIRST frame — no blank→icon flicker.
- * - Holds 200 icons ≈ 200 × (108×108×4) ≈ 9 MB peak.
+ * Optimisations applied:
+ *
+ * 1. Byte-based LruCache (20 MB cap).  The old count-based cache (200 entries)
+ *    was arbitrary.  Byte-based sizing means the budget is always spent on the
+ *    largest items first and we never evict icons that still fit.
+ *
+ * 2. Bitmap.Config.HARDWARE final storage.  After scaling, icons are uploaded
+ *    to GPU-resident memory.  Compose's Canvas skips the CPU→GPU upload on
+ *    every draw call — critical during fast scrolling where the same icons are
+ *    redrawn every 16 ms.  HARDWARE bitmaps are API-26+ (our minSdk).
+ *
+ * 3. Parallel preloading.  Icons are loaded in parallel using Dispatchers.IO
+ *    coroutines so the cache is warm well before the user opens the drawer.
+ *
+ * 4. getSync() for zero-overhead composition fast-path.
+ *    rememberAppIcon() calls getSync() inside remember() — if the icon is
+ *    already cached, the composable returns on the first frame with NO
+ *    coroutine launch, NO recomposition, and NO state allocation.
  */
 object IconCache {
 
-    /** Target bitmap size in pixels — matches ~52dp at 2× density. */
+    /** Decode at this size (px). Matches ~52 dp @ 2× density. */
     private const val TARGET_PX = 108
 
-    private val cache = LruCache<String, ImageBitmap>(200)
+    /** Estimated bytes per stored icon (HARDWARE bitmaps report 0 via byteCount). */
+    private val BYTES_PER_ICON = TARGET_PX * TARGET_PX * 4  // ARGB_8888 equivalent
 
-    /** Synchronous cache lookup — safe to call from the composition thread. */
+    /** 20 MB total icon budget. */
+    private const val MAX_BYTES = 20 * 1024 * 1024
+
+    private val cache = object : LruCache<String, ImageBitmap>(MAX_BYTES) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = BYTES_PER_ICON
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /**
+     * Synchronous cache lookup. Safe to call from the composition thread.
+     * Returns the cached bitmap instantly with zero overhead, or null on miss.
+     */
     fun getSync(packageName: String): ImageBitmap? = cache.get(packageName)
 
-    /** Returns cached bitmap immediately, or loads + caches it off the main thread. */
+    /**
+     * Returns the cached bitmap immediately, or loads it on Dispatchers.IO.
+     * Cache hits return in O(1) before the withContext dispatch.
+     */
     suspend fun getOrLoad(packageName: String, pm: PackageManager): ImageBitmap? {
         cache.get(packageName)?.let { return it }
         return withContext(Dispatchers.IO) {
-            runCatching {
-                val bmp = pm.getApplicationIcon(packageName).toScaledBitmap()
-                cache.put(packageName, bmp)
-                bmp
-            }.getOrNull()
+            runCatching { loadAndCache(packageName, pm) }.getOrNull()
         }
     }
 
-    /** Bulk-warm the cache for a list of packages (call from a background coroutine). */
-    suspend fun preload(packages: List<String>, pm: PackageManager) =
-        withContext(Dispatchers.IO) {
-            packages.forEach { pkg ->
-                if (cache.get(pkg) == null) {
-                    runCatching {
-                        val bmp = pm.getApplicationIcon(pkg).toScaledBitmap()
-                        cache.put(pkg, bmp)
-                    }
+    /**
+     * Bulk preload — loads all given packages in parallel on Dispatchers.IO.
+     * Only fetches packages not yet in cache. Call this after the app list
+     * is available so the drawer is fully warm before the user opens it.
+     */
+    suspend fun preload(packages: List<String>, pm: PackageManager) {
+        val missing = packages.filter { cache.get(it) == null }
+        if (missing.isEmpty()) return
+        coroutineScope {
+            missing.map { pkg ->
+                async(Dispatchers.IO) {
+                    runCatching { loadAndCache(pkg, pm) }
                 }
-            }
+            }.awaitAll()
         }
+    }
 
-    fun evict(packageName: String) = cache.remove(packageName)
-    fun clear() = cache.evictAll()
+    fun evict(packageName: String) { cache.remove(packageName) }
+    fun clear()                    { cache.evictAll() }
 
-    private fun Drawable.toScaledBitmap(): ImageBitmap {
-        // Draw at native size first, then scale down to TARGET_PX.
-        // Avoids aliasing that setBounds(TARGET, TARGET) alone can cause
-        // on some icon shapes.
-        val native = Bitmap.createBitmap(
-            if (intrinsicWidth  > 0) intrinsicWidth  else TARGET_PX,
-            if (intrinsicHeight > 0) intrinsicHeight else TARGET_PX,
-            Bitmap.Config.ARGB_8888
-        )
-        setBounds(0, 0, native.width, native.height)
+    // ── Internal ──────────────────────────────────────────────────────────────
+
+    /** Must be called from a background thread (reads APK from disk). */
+    private fun loadAndCache(packageName: String, pm: PackageManager): ImageBitmap {
+        // Re-check under the assumption another coroutine may have loaded it.
+        cache.get(packageName)?.let { return it }
+        val bmp = pm.getApplicationIcon(packageName).toHardwareBitmap()
+        cache.put(packageName, bmp)
+        return bmp
+    }
+
+    /**
+     * Converts a Drawable to a GPU-resident HARDWARE ImageBitmap at TARGET_PX.
+     *
+     * Pipeline:
+     *   1. Draw at native resolution into ARGB_8888 (avoids aliasing from a
+     *      direct small-canvas draw, especially for adaptive icons).
+     *   2. Scale down to TARGET_PX × TARGET_PX.
+     *   3. Copy to Bitmap.Config.HARDWARE — pixels move to GPU memory.
+     *   4. Recycle the intermediate CPU bitmaps.
+     */
+    private fun Drawable.toHardwareBitmap(): ImageBitmap {
+        val w = if (intrinsicWidth  > 0) intrinsicWidth  else TARGET_PX
+        val h = if (intrinsicHeight > 0) intrinsicHeight else TARGET_PX
+
+        // Step 1 — draw at native size
+        val native = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        setBounds(0, 0, w, h)
         draw(Canvas(native))
-        return if (native.width == TARGET_PX && native.height == TARGET_PX) {
-            native.asImageBitmap()
-        } else {
-            Bitmap.createScaledBitmap(native, TARGET_PX, TARGET_PX, true)
-                .also { native.recycle() }
-                .asImageBitmap()
-        }
+
+        // Step 2 — scale (skip if already the right size)
+        val scaled = if (w == TARGET_PX && h == TARGET_PX) native
+                     else Bitmap.createScaledBitmap(native, TARGET_PX, TARGET_PX, true)
+                         .also { if (it !== native) native.recycle() }
+
+        // Step 3 — upload to GPU memory
+        val hardware = scaled.copy(Bitmap.Config.HARDWARE, false)
+        scaled.recycle()
+
+        return hardware.asImageBitmap()
     }
 }

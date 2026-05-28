@@ -320,7 +320,8 @@ private fun OccupiedDockSlot(
     onRemoveFromDock: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val icon     = rememberAppIcon(app.packageName)
+    val pm = LocalContext.current.packageManager
+    val icon = rememberAppIcon(app.packageName, pm)
     val slotAlpha = if (dimmed) 0.35f else 1f
 
     Box {

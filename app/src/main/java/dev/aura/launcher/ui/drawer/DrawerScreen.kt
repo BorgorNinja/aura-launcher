@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,28 +66,46 @@ fun DrawerScreen(
     state:   AuraUiState,
     onEvent: (AuraEvent) -> Unit
 ) {
+    // Hoist PackageManager once — avoids one LocalContext.current lookup per
+    // item.  LocalContext.current is a CompositionLocal read (hash map lookup);
+    // with 100 items visible, hoisting saves ~100 lookups per recomposition.
+    val pm          = LocalContext.current.packageManager
     val displayList = if (state.isSearching) state.searchResults else state.apps
     val columns     = state.settings.gridColumns
 
+    // Grouped map — only recomputed when the list or search mode changes.
     val grouped = remember(displayList, state.isSearching) {
         if (state.isSearching) emptyMap()
-        else displayList.groupBy { it.label.firstOrNull()?.uppercaseChar() ?: '#' }.toSortedMap()
+        else displayList
+            .groupBy { it.label.firstOrNull()?.uppercaseChar() ?: '#' }
+            .toSortedMap()
     }
     val letters        = remember(grouped) { grouped.keys.toList() }
     val gridState      = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
 
+    // Map from letter → grid item index.  Used by the alphabetical scroll bar.
     val letterPositions = remember(grouped) {
-        val positions = mutableMapOf<Char, Int>()
-        var pos = 0
-        grouped.forEach { (letter, apps) ->
-            positions[letter] = pos
-            pos += 1 + apps.size
+        buildMap {
+            var pos = 0
+            grouped.forEach { (letter, apps) ->
+                put(letter, pos)
+                pos += 1 + apps.size   // +1 for the header item
+            }
         }
-        positions
     }
 
-    // Precompute dock state once — avoids recalculating inside each item
+    // derivedStateOf: recomputes only when firstVisibleItemIndex actually
+    // changes.  Without this, ANY state change would trigger a new
+    // currentLetter read, causing spurious recompositions of the index bar.
+    val currentLetter by remember {
+        derivedStateOf {
+            val idx = gridState.firstVisibleItemIndex
+            letters.lastOrNull { (letterPositions[it] ?: 0) <= idx } ?: letters.firstOrNull()
+        }
+    }
+
+    // Dock state precomputed once at screen level — not inside each item.
     val dockPackages = remember(state.dockSlots) {
         state.dockSlots.mapNotNull { it?.packageName }.toSet()
     }
@@ -114,7 +134,9 @@ fun DrawerScreen(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     unfocusedBorderColor    = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                 ),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
             )
 
             Spacer(Modifier.height(8.dp))
@@ -123,19 +145,25 @@ fun DrawerScreen(
                 LazyVerticalGrid(
                     columns        = GridCells.Fixed(columns),
                     state          = gridState,
-                    contentPadding = PaddingValues(start = 8.dp, end = 28.dp, top = 4.dp, bottom = 80.dp),
+                    contentPadding = PaddingValues(
+                        start  = 8.dp,
+                        end    = 28.dp,  // leave room for the scroll index bar
+                        top    = 4.dp,
+                        bottom = 80.dp
+                    ),
                     verticalArrangement   = Arrangement.spacedBy(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize()
+                    modifier              = Modifier.fillMaxSize()
                 ) {
                     if (state.isSearching) {
                         items(
                             items       = displayList,
                             key         = { it.packageName },
-                            contentType = { "app" }
+                            contentType = { "app" }   // enables composition reuse across items
                         ) { app ->
                             AppGridItem(
                                 app         = app,
+                                pm          = pm,
                                 inDock      = app.packageName in dockPackages,
                                 dockFull    = dockFull,
                                 onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
@@ -146,14 +174,21 @@ fun DrawerScreen(
                         }
                     } else {
                         grouped.forEach { (letter, apps) ->
-                            item(key = "header_$letter", span = { GridItemSpan(maxLineSpan) }) {
+                            item(
+                                key  = "header_$letter",
+                                span = { GridItemSpan(maxLineSpan) }
+                            ) {
                                 Text(
                                     text     = letter.toString(),
                                     style    = MaterialTheme.typography.labelLarge.copy(
                                         fontWeight = FontWeight.Bold,
                                         color      = MaterialTheme.colorScheme.primary
                                     ),
-                                    modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp)
+                                    modifier = Modifier.padding(
+                                        start  = 8.dp,
+                                        top    = 8.dp,
+                                        bottom = 4.dp
+                                    )
                                 )
                             }
                             items(
@@ -163,6 +198,7 @@ fun DrawerScreen(
                             ) { app ->
                                 AppGridItem(
                                     app         = app,
+                                    pm          = pm,
                                     inDock      = app.packageName in dockPackages,
                                     dockFull    = dockFull,
                                     onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
@@ -175,7 +211,7 @@ fun DrawerScreen(
                     }
                 }
 
-                // Alphabetical scroll index
+                // Alphabetical index bar
                 if (!state.isSearching && letters.isNotEmpty()) {
                     Column(
                         modifier = Modifier
@@ -183,24 +219,30 @@ fun DrawerScreen(
                             .fillMaxHeight()
                             .width(24.dp)
                             .padding(vertical = 8.dp)
-                            .pointerInput(letters) {
+                            .pointerInput(letterPositions) {
                                 detectTapGestures { offset ->
                                     val fraction = (offset.y / size.height).coerceIn(0f, 1f)
-                                    val idx = (fraction * letters.size).toInt().coerceIn(0, letters.lastIndex)
+                                    val idx = (fraction * letters.size)
+                                        .toInt()
+                                        .coerceIn(0, letters.lastIndex)
                                     val pos = letterPositions[letters[idx]] ?: return@detectTapGestures
                                     coroutineScope.launch { gridState.animateScrollToItem(pos) }
                                 }
                             },
-                        verticalArrangement = Arrangement.SpaceEvenly,
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        verticalArrangement   = Arrangement.SpaceEvenly,
+                        horizontalAlignment   = Alignment.CenterHorizontally
                     ) {
                         letters.forEach { letter ->
                             Text(
                                 text  = letter.toString(),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontSize   = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color      = MaterialTheme.colorScheme.primary
+                                    fontWeight = if (letter == currentLetter) FontWeight.ExtraBold
+                                                 else FontWeight.Normal,
+                                    color      = if (letter == currentLetter)
+                                                     MaterialTheme.colorScheme.primary
+                                                 else
+                                                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                 )
                             )
                         }
@@ -211,10 +253,20 @@ fun DrawerScreen(
     }
 }
 
+// ─── Grid item ────────────────────────────────────────────────────────────────
+
+/**
+ * [pm] is passed in (not read from LocalContext) to avoid one CompositionLocal
+ * lookup per item — hoisted to screen level in [DrawerScreen].
+ *
+ * With @Stable on AppInfo, Compose can skip recomposing this item when [app]
+ * hasn't changed, even if the parent DrawerScreen recomposes.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppGridItem(
     app:         AppInfo,
+    pm:          android.content.pm.PackageManager,
     inDock:      Boolean,
     dockFull:    Boolean,
     onClick:     () -> Unit,
@@ -223,13 +275,16 @@ fun AppGridItem(
     onAddToDock: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val icon: ImageBitmap? = rememberAppIcon(app.packageName)
+    val icon: ImageBitmap? = rememberAppIcon(app.packageName, pm)
 
     Box {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .combinedClickable(onClick = onClick, onLongClick = { menuExpanded = true })
+            modifier            = Modifier
+                .combinedClickable(
+                    onClick     = onClick,
+                    onLongClick = { menuExpanded = true }
+                )
                 .padding(8.dp)
         ) {
             if (icon != null) {
@@ -239,6 +294,8 @@ fun AppGridItem(
                     modifier           = Modifier.size(52.dp)
                 )
             } else {
+                // Placeholder shown only while the icon is loading (cache miss).
+                // After preload this should never be visible during normal scrolling.
                 Box(
                     modifier = Modifier
                         .size(52.dp)
@@ -256,7 +313,10 @@ fun AppGridItem(
             )
         }
 
-        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+        DropdownMenu(
+            expanded         = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
             DropdownMenuItem(
                 text    = { Text("Open") },
                 onClick = { menuExpanded = false; onClick() }
@@ -269,7 +329,6 @@ fun AppGridItem(
                 text    = { Text("Uninstall") },
                 onClick = { menuExpanded = false; onUninstall() }
             )
-            // Show "Add to Dock" only when there's a free slot and app isn't already docked
             if (!inDock && !dockFull) {
                 DropdownMenuItem(
                     text    = { Text("Add to Dock") },
