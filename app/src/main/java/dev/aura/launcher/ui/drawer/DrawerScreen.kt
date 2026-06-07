@@ -1,10 +1,19 @@
 package dev.aura.launcher.ui.drawer
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +35,11 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -47,9 +60,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,14 +82,10 @@ fun DrawerScreen(
     state:   AuraUiState,
     onEvent: (AuraEvent) -> Unit
 ) {
-    // Hoist PackageManager once — avoids one LocalContext.current lookup per
-    // item.  LocalContext.current is a CompositionLocal read (hash map lookup);
-    // with 100 items visible, hoisting saves ~100 lookups per recomposition.
     val pm          = LocalContext.current.packageManager
     val displayList = if (state.isSearching) state.searchResults else state.apps
     val columns     = state.settings.gridColumns
 
-    // Grouped map — only recomputed when the list or search mode changes.
     val grouped = remember(displayList, state.isSearching) {
         if (state.isSearching) emptyMap()
         else displayList
@@ -84,20 +96,16 @@ fun DrawerScreen(
     val gridState      = rememberLazyGridState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Map from letter → grid item index.  Used by the alphabetical scroll bar.
     val letterPositions = remember(grouped) {
         buildMap {
             var pos = 0
             grouped.forEach { (letter, apps) ->
                 put(letter, pos)
-                pos += 1 + apps.size   // +1 for the header item
+                pos += 1 + apps.size
             }
         }
     }
 
-    // derivedStateOf: recomputes only when firstVisibleItemIndex actually
-    // changes.  Without this, ANY state change would trigger a new
-    // currentLetter read, causing spurious recompositions of the index bar.
     val currentLetter by remember {
         derivedStateOf {
             val idx = gridState.firstVisibleItemIndex
@@ -105,7 +113,6 @@ fun DrawerScreen(
         }
     }
 
-    // Dock state precomputed once at screen level — not inside each item.
     val dockPackages = remember(state.dockSlots) {
         state.dockSlots.mapNotNull { it?.packageName }.toSet()
     }
@@ -118,7 +125,7 @@ fun DrawerScreen(
             OutlinedTextField(
                 value         = state.searchQuery,
                 onValueChange = { onEvent(AuraEvent.Search(it)) },
-                placeholder   = { Text("Search apps…") },
+                placeholder   = { Text("Search apps\u2026") },
                 leadingIcon   = { Icon(Icons.Default.Search, null) },
                 trailingIcon  = {
                     if (state.searchQuery.isNotBlank()) {
@@ -147,7 +154,7 @@ fun DrawerScreen(
                     state          = gridState,
                     contentPadding = PaddingValues(
                         start  = 8.dp,
-                        end    = 28.dp,  // leave room for the scroll index bar
+                        end    = 28.dp,
                         top    = 4.dp,
                         bottom = 80.dp
                     ),
@@ -159,7 +166,7 @@ fun DrawerScreen(
                         items(
                             items       = displayList,
                             key         = { it.packageName },
-                            contentType = { "app" }   // enables composition reuse across items
+                            contentType = { "app" }
                         ) { app ->
                             AppGridItem(
                                 app         = app,
@@ -255,13 +262,6 @@ fun DrawerScreen(
 
 // ─── Grid item ────────────────────────────────────────────────────────────────
 
-/**
- * [pm] is passed in (not read from LocalContext) to avoid one CompositionLocal
- * lookup per item — hoisted to screen level in [DrawerScreen].
- *
- * With @Stable on AppInfo, Compose can skip recomposing this item when [app]
- * hasn't changed, even if the parent DrawerScreen recomposes.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppGridItem(
@@ -276,14 +276,30 @@ fun AppGridItem(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val icon: ImageBitmap? = rememberAppIcon(app.packageName, pm)
+    val haptic = LocalHapticFeedback.current
+
+    // Scale-down feedback on press — gives tactile confirmation before the menu appears.
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue  = if (isPressed) 0.90f else 1f,
+        animationSpec = tween(durationMillis = 120),
+        label        = "item_press_scale"
+    )
 
     Box {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier            = Modifier
+                .scale(scale)
                 .combinedClickable(
-                    onClick     = onClick,
-                    onLongClick = { menuExpanded = true }
+                    interactionSource = interactionSource,
+                    indication        = null,   // custom scale replaces ripple
+                    onClick           = onClick,
+                    onLongClick       = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        menuExpanded = true
+                    }
                 )
                 .padding(8.dp)
         ) {
@@ -294,13 +310,24 @@ fun AppGridItem(
                     modifier           = Modifier.size(52.dp)
                 )
             } else {
-                // Placeholder shown only while the icon is loading (cache miss).
-                // After preload this should never be visible during normal scrolling.
+                // Animated shimmer placeholder while the icon loads.
+                val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
+                val shimmerAlpha by shimmerTransition.animateFloat(
+                    initialValue  = 0.25f,
+                    targetValue   = 0.55f,
+                    animationSpec = infiniteRepeatable(
+                        animation  = tween(700, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "shimmer_alpha"
+                )
                 Box(
                     modifier = Modifier
                         .size(52.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
+                        )
                 )
             }
             Spacer(Modifier.height(4.dp))
@@ -318,21 +345,26 @@ fun AppGridItem(
             onDismissRequest = { menuExpanded = false }
         ) {
             DropdownMenuItem(
-                text    = { Text("Open") },
-                onClick = { menuExpanded = false; onClick() }
+                leadingIcon = { Icon(Icons.Default.OpenInNew,      null, modifier = Modifier.size(18.dp)) },
+                text        = { Text("Open") },
+                onClick     = { menuExpanded = false; onClick() }
             )
             DropdownMenuItem(
-                text    = { Text("App info") },
-                onClick = { menuExpanded = false; onAppInfo() }
+                leadingIcon = { Icon(Icons.Default.Info,            null, modifier = Modifier.size(18.dp)) },
+                text        = { Text("App info") },
+                onClick     = { menuExpanded = false; onAppInfo() }
             )
             DropdownMenuItem(
-                text    = { Text("Uninstall") },
-                onClick = { menuExpanded = false; onUninstall() }
+                leadingIcon = { Icon(Icons.Default.DeleteOutline,   null, modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.error) },
+                text        = { Text("Uninstall", color = MaterialTheme.colorScheme.error) },
+                onClick     = { menuExpanded = false; onUninstall() }
             )
             if (!inDock && !dockFull) {
                 DropdownMenuItem(
-                    text    = { Text("Add to Dock") },
-                    onClick = { menuExpanded = false; onAddToDock() }
+                    leadingIcon = { Icon(Icons.Default.AddCircleOutline, null, modifier = Modifier.size(18.dp)) },
+                    text        = { Text("Add to Dock") },
+                    onClick     = { menuExpanded = false; onAddToDock() }
                 )
             }
         }
