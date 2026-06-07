@@ -37,9 +37,16 @@ class AppRepository(context: Context) {
     }
 
     suspend fun uninstall(context: Context, packageName: String) {
-        val intent = Intent(Intent.ACTION_DELETE).apply {
+        // ACTION_UNINSTALL_PACKAGE is the canonical intent for app removal.
+        // ACTION_DELETE is a generic content-deletion action that some OEM ROMs
+        // (including XOS/Infinix) and Android 10+ strict-permission enforcement
+        // may silently swallow when REQUEST_DELETE_PACKAGES is absent.
+        // Using EXTRA_RETURN_RESULT = false keeps the old fire-and-forget
+        // behaviour (no ActivityResult callback needed).
+        val intent = Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
             data = Uri.parse("package:$packageName")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(Intent.EXTRA_RETURN_RESULT, false)
         }
         context.startActivity(intent)
     }
@@ -56,7 +63,6 @@ class AppRepository(context: Context) {
         val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        // Fall back to generic wallpaper picker if live wallpaper picker unavailable
         val target = if (pm.resolveActivity(intent, 0) != null) intent
                      else Intent(Intent.ACTION_SET_WALLPAPER).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         context.startActivity(target)
