@@ -22,6 +22,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_WIDGET_IDS        = stringPreferencesKey("widget_ids")
         val KEY_SWIPE_DOWN_ACTION = stringPreferencesKey("swipe_down_action")
         val KEY_DOUBLE_TAP_ACTION = stringPreferencesKey("double_tap_action")
+        val KEY_COLOR_THEME       = stringPreferencesKey("color_theme")
         // Dock: 4 slots stored as "pkg1|pkg2||pkg4" (empty = vacant)
         val KEY_DOCK_SLOTS        = stringPreferencesKey("dock_slots")
     }
@@ -33,7 +34,8 @@ class SettingsRepository(private val context: Context) {
             notificationDots = prefs[KEY_NOTIFICATION_DOTS] ?: true,
             iconPackPackage  = prefs[KEY_ICON_PACK]         ?: "",
             swipeDownAction  = prefs[KEY_SWIPE_DOWN_ACTION] ?: "notifications",
-            doubleTapAction  = prefs[KEY_DOUBLE_TAP_ACTION] ?: "none"
+            doubleTapAction  = prefs[KEY_DOUBLE_TAP_ACTION] ?: "none",
+            colorTheme       = prefs[KEY_COLOR_THEME]       ?: "dynamic"
         )
     }
 
@@ -56,6 +58,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setIconPack(pkg: String)            = context.dataStore.edit { it[KEY_ICON_PACK]         = pkg }
     suspend fun setSwipeDownAction(action: String)  = context.dataStore.edit { it[KEY_SWIPE_DOWN_ACTION] = action }
     suspend fun setDoubleTapAction(action: String)  = context.dataStore.edit { it[KEY_DOUBLE_TAP_ACTION] = action }
+    suspend fun setColorTheme(theme: String)        = context.dataStore.edit { it[KEY_COLOR_THEME]       = theme }
 
     suspend fun setDockSlot(index: Int, packageName: String?) {
         context.dataStore.edit { prefs ->
