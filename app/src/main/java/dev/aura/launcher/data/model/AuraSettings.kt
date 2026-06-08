@@ -6,5 +6,6 @@ data class AuraSettings(
     val notificationDots: Boolean = true,
     val iconPackPackage:  String  = "",
     val swipeDownAction:  String  = "notifications", // "notifications"|"camera"|"assistant"|"lock"|"none"
-    val doubleTapAction:  String  = "none"           // "clock"|"camera"|"assistant"|"lock"|"none"
+    val doubleTapAction:  String  = "none",          // "clock"|"camera"|"assistant"|"lock"|"none"
+    val colorTheme:       String  = "dynamic"        // see AuraPaletteEntry.key in AuraTheme.kt
 )
