@@ -33,7 +33,8 @@ import kotlinx.coroutines.launch
 data class AuraUiState(
     val selectedTab:    NavigationTab    = NavigationTab.HOME,
     val apps:           List<AppInfo>    = emptyList(),
-    val dockSlots:      List<AppInfo?>   = listOf(null, null, null, null),
+    // 12 slots (3 groups × 4), null = vacant
+    val dockSlots:      List<AppInfo?>   = List(12) { null },
     val pendingDockAdd: AppInfo?         = null,
     val searchQuery:    String           = "",
     val searchResults:  List<AppInfo>    = emptyList(),
@@ -67,8 +68,12 @@ sealed interface AuraEvent {
     data class SetColorTheme(val theme: String)         : AuraEvent
     // Dock management
     data class StartDockAdd(val app: AppInfo)           : AuraEvent
+    /** slotIndex 0..3 relative to the active group */
     data class PlaceDockApp(val slotIndex: Int)         : AuraEvent
-    data class RemoveFromDock(val slotIndex: Int)       : AuraEvent
+    /** absIndex 0..11 absolute across all groups */
+    data class RemoveFromDock(val absIndex: Int)        : AuraEvent
+    /** delta: +1 = advance to next group (swipe left), -1 = go to prev (swipe right) */
+    data class RotateDockGroup(val delta: Int)          : AuraEvent
     data object CancelDockAdd                           : AuraEvent
     data object ClearSearch                             : AuraEvent
     data object PickWallpaper                           : AuraEvent
@@ -100,6 +105,7 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
             }
         }.launchIn(viewModelScope)
 
+        // Combine 12 dock slots with app list to produce AppInfo? for each slot
         combine(appRepo.allApps, settingsRepo.dockSlots) { apps, pkgSlots ->
             val map = apps.associateBy { it.packageName }
             pkgSlots.map { pkg -> if (pkg == null) null else map[pkg] }
@@ -128,12 +134,8 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
                 if (event.tab == NavigationTab.HOME) {
                     _query.value = ""
                     _state.update {
-                        it.copy(
-                            selectedTab   = event.tab,
-                            searchQuery   = "",
-                            isSearching   = false,
-                            searchResults = emptyList()
-                        )
+                        it.copy(selectedTab = event.tab, searchQuery = "",
+                                isSearching = false, searchResults = emptyList())
                     }
                 } else {
                     _state.update { it.copy(selectedTab = event.tab) }
@@ -160,15 +162,25 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
             is AuraEvent.SetSwipeDownAction -> viewModelScope.launch { settingsRepo.setSwipeDownAction(event.action) }
             is AuraEvent.SetDoubleTapAction -> viewModelScope.launch { settingsRepo.setDoubleTapAction(event.action) }
             is AuraEvent.SetColorTheme      -> viewModelScope.launch { settingsRepo.setColorTheme(event.theme) }
+            is AuraEvent.RotateDockGroup    -> {
+                val cur      = _state.value.settings.activeDockGroup
+                val newGroup = ((cur + event.delta) % 3 + 3) % 3
+                // Optimistic update so animation snap is seamless
+                _state.update { it.copy(settings = it.settings.copy(activeDockGroup = newGroup)) }
+                viewModelScope.launch { settingsRepo.setDockGroup(newGroup) }
+            }
             is AuraEvent.StartDockAdd       -> _state.update {
                 it.copy(pendingDockAdd = event.app, selectedTab = NavigationTab.HOME)
             }
             is AuraEvent.PlaceDockApp       -> {
                 val pending = _state.value.pendingDockAdd ?: return
+                val absIdx  = _state.value.settings.activeDockGroup * 4 + event.slotIndex
                 _state.update { it.copy(pendingDockAdd = null) }
-                viewModelScope.launch { settingsRepo.setDockSlot(event.slotIndex, pending.packageName) }
+                viewModelScope.launch { settingsRepo.setDockSlot(absIdx, pending.packageName) }
             }
-            is AuraEvent.RemoveFromDock     -> viewModelScope.launch { settingsRepo.setDockSlot(event.slotIndex, null) }
+            is AuraEvent.RemoveFromDock     -> viewModelScope.launch {
+                settingsRepo.setDockSlot(event.absIndex, null)
+            }
             AuraEvent.CancelDockAdd         -> _state.update { it.copy(pendingDockAdd = null) }
         }
     }
