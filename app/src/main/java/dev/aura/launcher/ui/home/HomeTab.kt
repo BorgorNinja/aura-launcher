@@ -7,22 +7,18 @@ import android.content.pm.PackageManager
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -49,19 +46,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.aura.launcher.data.model.AppInfo
@@ -69,9 +73,15 @@ import dev.aura.launcher.service.LockScreenService
 import dev.aura.launcher.ui.navigation.NavigationTab
 import dev.aura.launcher.ui.util.rememberAppIcon
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 
 // ─── Gesture action executor ──────────────────────────────────────────────────
 
@@ -88,22 +98,13 @@ fun executeGestureAction(context: Context, action: String) {
         "notifications" -> expandNotificationPanel(context)
         "lock"          -> LockScreenService.lock()
         "camera"        -> runCatching {
-            context.startActivity(
-                Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            context.startActivity(Intent(MediaStore.ACTION_IMAGE_CAPTURE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         "clock"         -> runCatching {
-            context.startActivity(
-                Intent(AlarmClock.ACTION_SHOW_ALARMS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            context.startActivity(Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         "assistant"     -> runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VOICE_COMMAND)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            context.startActivity(Intent(Intent.ACTION_VOICE_COMMAND).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
 }
@@ -136,9 +137,7 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
                 )
             }
             .pointerInput("doubletap") {
-                detectTapGestures(
-                    onDoubleTap = { executeGestureAction(context, settings.doubleTapAction) }
-                )
+                detectTapGestures(onDoubleTap = { executeGestureAction(context, settings.doubleTapAction) })
             }
     ) {
         Column(
@@ -165,17 +164,24 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
-            // Hoist PackageManager here — one LocalContext.current lookup for
-            // all dock slots instead of one per OccupiedDockSlot composable.
-            val pm = LocalContext.current.packageManager
-            DockRow(
-                slots                 = state.dockSlots,
+            val pm     = LocalContext.current.packageManager
+            val groups = remember(state.dockSlots) {
+                state.dockSlots.chunked(4).let { c ->
+                    // Ensure exactly 3 groups
+                    List(3) { i -> if (i < c.size) c[i] else List(4) { null } }
+                }
+            }
+
+            DockBelt(
+                groups                = groups,
+                activeGroupIdx        = settings.activeDockGroup,
                 pendingAdd            = state.pendingDockAdd,
                 pm                    = pm,
                 onLaunch              = { onEvent(AuraEvent.Launch(it)) },
                 onRemoveFromDock      = { onEvent(AuraEvent.RemoveFromDock(it)) },
                 onSlotTap             = { onEvent(AuraEvent.PlaceDockApp(it)) },
-                onLongPressBackground = { onEvent(AuraEvent.PickWallpaper) }
+                onLongPressBackground = { onEvent(AuraEvent.PickWallpaper) },
+                onRotateDockGroup     = { onEvent(AuraEvent.RotateDockGroup(it)) }
             )
         }
     }
@@ -227,238 +233,394 @@ private fun SearchPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.Start,
             modifier              = Modifier.padding(horizontal = 16.dp)
         ) {
-            Icon(
-                imageVector        = Icons.Default.Search,
-                contentDescription = null,
-                tint               = MaterialTheme.colorScheme.primary
-            )
+            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
-            Text(
-                text  = "Search apps & web",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text("Search apps & web", style = MaterialTheme.typography.bodyLarge,
+                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 // ─── Clock ────────────────────────────────────────────────────────────────────
 
-/**
- * Live clock that updates every second.
- *
- * The `time` and `date` formatters are created once and reused — SimpleDateFormat
- * construction is non-trivial (locale data lookup). The `LaunchedEffect(Unit)`
- * coroutine runs for the lifetime of this composable; `delay(1_000)` yields the
- * thread rather than spinning. Only `ClockBlock` recomposes each tick — the rest
- * of HomeTab is unaffected because the mutableStateOf is scoped here.
- */
 @Composable
 private fun ClockBlock() {
     var now by remember { mutableStateOf(Date()) }
-
-    // Tick every second. LaunchedEffect(Unit) means this runs once and lives
-    // as long as ClockBlock is in the composition.
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_000L)
-            now = Date()
-        }
-    }
-
-    // Formatters are heavy; create once and reuse on each tick.
+    LaunchedEffect(Unit) { while (true) { delay(1_000L); now = Date() } }
     val timeFmt = remember { SimpleDateFormat("HH:mm",       Locale.getDefault()) }
     val dateFmt = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()) }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text  = timeFmt.format(now),
-            style = MaterialTheme.typography.displayLarge.copy(
-                fontWeight = FontWeight.Light, fontSize = 80.sp, color = Color.White
-            )
+        Text(timeFmt.format(now), style = MaterialTheme.typography.displayLarge.copy(
+            fontWeight = FontWeight.Light, fontSize = 80.sp, color = Color.White))
+        Text(dateFmt.format(now), style = MaterialTheme.typography.titleMedium.copy(
+            color = Color.White.copy(alpha = 0.8f)))
+    }
+}
+
+// ─── DockBelt ─────────────────────────────────────────────────────────────────
+//
+//  Visual layout (at rest):
+//
+//  [L0]                         [R0]   ← mini strip icons (26dp, stacked)
+//  [L1]                         [R1]
+//  [L2]                         [R2]
+//  [L3] [── main dock ──────] [R3]   ← slot-3 of each strip aligns with main dock
+//
+//  Horizontal swipe rotates the belt: icons animate between strip ↔ main positions.
+
+private data class BeltIconState(
+    val xPx: Int,
+    val yPx: Int,
+    val sizeDp: Float,   // in dp
+    val alpha: Float
+)
+
+/** Compute where icon [slotIdx] should be, given its current virtual belt position [virtPos].
+ *  virtPos = -1 → left strip, 0 → main dock (center), +1 → right strip.
+ *  Values outside [-1,+1] fade out as the icon exits the visible area. */
+private fun computeBeltIconState(
+    slotIdx: Int,
+    virtPos: Float,
+    totalWidthPx: Int,
+    density: Density
+): BeltIconState {
+    fun Float.dpToPx() = with(density) { this@dpToPx.dp.toPx() }
+
+    val fullSzPx  = 52f.dpToPx()
+    val miniSzPx  = 26f.dpToPx()
+    val spacingPx = 30f.dpToPx()   // y-increment per mini slot (26dp icon + 4dp gap)
+    val stripWPx  = 38f.dpToPx()   // total width of each side strip
+    val padPx     = 6f.dpToPx()    // icon inset from strip outer edge
+    val mainYPx   = (3 * 30f).dpToPx()   // = 90dp — main dock icon y in belt box
+
+    val slotW = (totalWidthPx - 2 * stripWPx) / 4f   // width allocated per main-dock icon
+
+    // Anchor positions
+    val cX = stripWPx + slotIdx * slotW + (slotW - fullSzPx) / 2f   // center → main dock
+    val cY = mainYPx
+    val lX = padPx                                                    // left strip
+    val lY = slotIdx * spacingPx
+    val rX = totalWidthPx - padPx - miniSzPx                         // right strip
+    val rY = slotIdx * spacingPx
+
+    fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+    val v = virtPos.coerceIn(-1.6f, 1.6f)
+
+    return when {
+        v < -1f -> BeltIconState(
+            lX.roundToInt(), lY.roundToInt(), 26f,
+            alpha = (1f - (-v - 1f) / 0.6f).coerceIn(0f, 1f)
         )
-        Text(
-            text  = dateFmt.format(now),
-            style = MaterialTheme.typography.titleMedium.copy(
-                color = Color.White.copy(alpha = 0.8f)
+        v < 0f -> {
+            val t = -v  // 0 = center, 1 = left
+            BeltIconState(
+                lerp(cX, lX, t).roundToInt(), lerp(cY, lY, t).roundToInt(),
+                lerp(52f, 26f, t), alpha = 1f
             )
+        }
+        v <= 1f -> {
+            val t = v  // 0 = center, 1 = right
+            BeltIconState(
+                lerp(cX, rX, t).roundToInt(), lerp(cY, rY, t).roundToInt(),
+                lerp(52f, 26f, t), alpha = 1f
+            )
+        }
+        else -> BeltIconState(
+            rX.roundToInt(), rY.roundToInt(), 26f,
+            alpha = (1f - (v - 1f) / 0.6f).coerceIn(0f, 1f)
         )
     }
 }
 
-// ─── Dock row ─────────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DockRow(
-    slots:                List<AppInfo?>,
+private fun DockBelt(
+    groups:               List<List<AppInfo?>>,   // exactly 3 groups × 4 slots
+    activeGroupIdx:       Int,
     pendingAdd:           AppInfo?,
     pm:                   PackageManager,
     onLaunch:             (String) -> Unit,
-    onRemoveFromDock:     (Int) -> Unit,
-    onSlotTap:            (Int) -> Unit,
-    onLongPressBackground: () -> Unit
+    onRemoveFromDock:     (absIdx: Int) -> Unit,
+    onSlotTap:            (relIdx: Int) -> Unit,
+    onLongPressBackground: () -> Unit,
+    onRotateDockGroup:    (delta: Int) -> Unit,
 ) {
-    Surface(
-        shape          = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        color          = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-        tonalElevation = 4.dp,
-        modifier       = Modifier
+    val density    = LocalDensity.current
+    val haptic     = LocalHapticFeedback.current
+    val scope      = rememberCoroutineScope()
+    val beltOffset = remember { Animatable(0f) }
+
+    // Group indices in belt order: left / center / right
+    val leftIdx  = (activeGroupIdx + 2) % 3
+    val rightIdx = (activeGroupIdx + 1) % 3
+
+    // Virtual belt position for each group (updated by beltOffset)
+    // leftGroup  at virtPos = -1 + beltOffset
+    // mainGroup  at virtPos =  0 + beltOffset
+    // rightGroup at virtPos = +1 + beltOffset
+
+    // Simple drag velocity estimate
+    var dragStartTime by remember { mutableLongStateOf(0L) }
+    var dragTotal     by remember { mutableFloatStateOf(0f) }
+
+    fun rotateLeft() {   // swipe left → right group slides to center
+        scope.launch {
+            beltOffset.animateTo(-1f, spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium))
+            onRotateDockGroup(+1)
+            beltOffset.snapTo(0f)
+        }
+    }
+
+    fun rotateRight() {  // swipe right → left group slides to center
+        scope.launch {
+            beltOffset.animateTo(+1f, spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium))
+            onRotateDockGroup(-1)
+            beltOffset.snapTo(0f)
+        }
+    }
+
+    fun snapBack() {
+        scope.launch { beltOffset.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium)) }
+    }
+
+    // Belt content height: 3 mini rows above main dock + main dock icons + label
+    val beltContentHeight = 162.dp   // (3×30dp) + 52dp + 4dp + 16dp + 16dp padding
+
+    BoxWithConstraints(
+        modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick     = {},
-                onLongClick = if (pendingAdd == null) onLongPressBackground else null
-            )
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        dragStartTime = System.currentTimeMillis()
+                        dragTotal = 0f
+                    },
+                    onDragEnd = {
+                        val elapsed = (System.currentTimeMillis() - dragStartTime).coerceAtLeast(1L)
+                        val velocity = dragTotal / elapsed * 1000f  // px/s
+                        when {
+                            beltOffset.value < -0.28f || velocity < -900f -> rotateLeft()
+                            beltOffset.value > 0.28f  || velocity > 900f  -> rotateRight()
+                            else -> snapBack()
+                        }
+                    },
+                    onHorizontalDrag = { _, delta ->
+                        dragTotal += delta
+                        scope.launch {
+                            beltOffset.snapTo(
+                                (beltOffset.value + delta / constraints.maxWidth.toFloat())
+                                    .coerceIn(-1.25f, 1.25f)
+                            )
+                        }
+                    }
+                )
+            }
     ) {
-        Row(
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment     = Alignment.CenterVertically,
-            modifier              = Modifier
+        val totalWidthPx = constraints.maxWidth
+
+        Surface(
+            shape          = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color          = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+            tonalElevation = 4.dp,
+            modifier       = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 12.dp)
-                .padding(bottom = 72.dp)
+                .combinedClickable(
+                    onClick     = {},
+                    onLongClick = if (pendingAdd == null) onLongPressBackground else null
+                )
         ) {
-            slots.forEachIndexed { index, app ->
-                if (app != null) {
-                    OccupiedDockSlot(
-                        app              = app,
-                        pm               = pm,
-                        dimmed           = pendingAdd != null,
-                        onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
-                        onRemoveFromDock = { onRemoveFromDock(index) }
-                    )
-                } else {
-                    VacantDockSlot(
-                        highlighted = pendingAdd != null,
-                        onTap       = if (pendingAdd != null) { { onSlotTap(index) } } else null
-                    )
+            Column {
+                // ── Belt icon canvas ──────────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(beltContentHeight)
+                ) {
+                    // Render all 3 groups; each icon is placed at its computed position
+                    listOf(
+                        Triple(groups[leftIdx],       -1f + beltOffset.value,  leftIdx),
+                        Triple(groups[activeGroupIdx],  0f + beltOffset.value,  activeGroupIdx),
+                        Triple(groups[rightIdx],       +1f + beltOffset.value,  rightIdx),
+                    ).forEach { (slots, virtPos, groupIdx) ->
+                        slots.forEachIndexed { slotIdx, app ->
+                            val bState = computeBeltIconState(slotIdx, virtPos, totalWidthPx, density)
+                            if (bState.alpha > 0.02f) {
+                                BeltIcon(
+                                    app            = app,
+                                    pm             = pm,
+                                    bState         = bState,
+                                    isActiveGroup  = abs(virtPos) < 0.45f,
+                                    pendingAdd     = pendingAdd,
+                                    absIdx         = groupIdx * 4 + slotIdx,
+                                    relIdx         = slotIdx,
+                                    onLaunch       = { app?.let { onLaunch(it.packageName) } },
+                                    onSlotTap      = { onSlotTap(slotIdx) },
+                                    onRemove       = { onRemoveFromDock(groupIdx * 4 + slotIdx) },
+                                    onLongClick    = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) },
+                                    onTapMiniLeft  = ::rotateRight,
+                                    onTapMiniRight = ::rotateLeft
+                                )
+                            }
+                        }
+                    }
+
+                    // ── Dot indicators ───────────────────────────────────────
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 6.dp)
+                    ) {
+                        repeat(3) { i ->
+                            Box(
+                                modifier = Modifier
+                                    .size(if (i == activeGroupIdx) 7.dp else 5.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (i == activeGroupIdx)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                    )
+                            )
+                        }
+                    }
                 }
+
+                // ── Nav bar clearance ─────────────────────────────────────────
+                Spacer(modifier = Modifier.navigationBarsPadding().height(76.dp))
             }
         }
     }
 }
 
-// ─── Occupied dock slot ───────────────────────────────────────────────────────
+// ─── Individual belt icon ─────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OccupiedDockSlot(
-    app:              AppInfo,
-    pm:               PackageManager,
-    dimmed:           Boolean,
-    onLaunch:         (() -> Unit)?,
-    onRemoveFromDock: () -> Unit
+private fun BeltIcon(
+    app:            AppInfo?,
+    pm:             PackageManager,
+    bState:         BeltIconState,
+    isActiveGroup:  Boolean,    // true when virtPos ≈ 0 (in main dock position)
+    pendingAdd:     AppInfo?,
+    absIdx:         Int,
+    relIdx:         Int,
+    onLaunch:       () -> Unit,
+    onSlotTap:      () -> Unit,
+    onRemove:       () -> Unit,
+    onLongClick:    () -> Unit,
+    onTapMiniLeft:  () -> Unit,
+    onTapMiniRight: () -> Unit,
 ) {
+    val sizeDp      = bState.sizeDp.dp
+    val isMini      = bState.sizeDp < 42f
+    val showLabel   = bState.sizeDp > 45f
+    val icon        = if (app != null) rememberAppIcon(app.packageName, pm) else null
     var showMenu by remember { mutableStateOf(false) }
-    val icon     = rememberAppIcon(app.packageName, pm)
-    val slotAlpha = if (dimmed) 0.35f else 1f
 
-    Box {
+    val clickModifier = when {
+        // Tapping a mini strip icon rotates the belt toward that side
+        isMini && bState.xPx < 100 -> Modifier.clickable { onTapMiniLeft() }
+        isMini                      -> Modifier.clickable { onTapMiniRight() }
+        // Placement mode: tap vacant main-dock slot
+        pendingAdd != null && isActiveGroup && app == null ->
+            Modifier.clickable { onSlotTap() }
+        // Normal tap/long-press on occupied main-dock slot
+        pendingAdd == null && app != null && isActiveGroup ->
+            Modifier.combinedClickable(
+                onClick     = onLaunch,
+                onLongClick = { onLongClick(); showMenu = true }
+            )
+        else -> Modifier
+    }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(bState.xPx, bState.yPx) }
+            .size(sizeDp)
+            .alpha(bState.alpha)
+            .then(clickModifier)
+    ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .combinedClickable(
-                    onClick     = { onLaunch?.invoke() },
-                    onLongClick = { showMenu = true }
-                )
-                .padding(4.dp)
-                .alpha(slotAlpha)
+            modifier            = Modifier.fillMaxSize()
         ) {
-            if (icon != null) {
-                Image(
-                    bitmap             = icon,
-                    contentDescription = app.label,
-                    modifier           = Modifier.size(52.dp)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier         = Modifier.size(sizeDp)
+            ) {
+                when {
+                    icon != null ->
+                        Image(icon, app?.label ?: "", modifier = Modifier.size(sizeDp))
+
+                    app == null && pendingAdd != null && isActiveGroup -> {
+                        // Glowing vacant slot in placement mode
+                        Box(
+                            modifier = Modifier
+                                .size(sizeDp)
+                                .clip(CircleShape)
+                                .border(
+                                    2.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(
+                                Icons.Default.Add, null,
+                                tint     = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.align(Alignment.Center).size(sizeDp * 0.45f)
+                            )
+                        }
+                    }
+
+                    app == null && isActiveGroup && !isMini -> {
+                        // Vacant slot at rest (main dock only)
+                        Box(
+                            modifier = Modifier
+                                .size(sizeDp)
+                                .clip(CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f), CircleShape)
+                        )
+                    }
+
+                    app == null && isMini -> {
+                        // Empty mini strip slot: subtle dot
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f))
+                        )
+                    }
+                }
+            }
+
+            if (showLabel && app != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text      = app.label,
+                    style     = MaterialTheme.typography.labelSmall.copy(color = Color.White),
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier.width(sizeDp)
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text      = app.label,
-                style     = MaterialTheme.typography.labelSmall.copy(color = Color.White),
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
-            )
         }
 
-        DropdownMenu(
-            expanded          = showMenu,
-            onDismissRequest  = { showMenu = false }
-        ) {
-            DropdownMenuItem(
-                text    = { Text("Open") },
-                onClick = { showMenu = false; onLaunch?.invoke() }
-            )
-            DropdownMenuItem(
-                text    = { Text("Remove from Dock") },
-                onClick = { showMenu = false; onRemoveFromDock() }
-            )
+        if (app != null && showMenu) {
+            DropdownMenu(
+                expanded         = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(text = { Text("Open") },
+                    onClick = { showMenu = false; onLaunch() })
+                DropdownMenuItem(text = { Text("Remove from Dock") },
+                    onClick = { showMenu = false; onRemove() })
+            }
         }
-    }
-}
-
-// ─── Vacant dock slot ─────────────────────────────────────────────────────────
-
-/**
- * The infinite pulse animation is only created when [highlighted] is true
- * (i.e. the user is in dock-placement mode).  When [highlighted] is false the
- * composable renders a static border with no running animation — no frame
- * callbacks, no recompositions, no GPU work — so the home screen is completely
- * idle when the user is just looking at it normally.
- */
-@Composable
-private fun VacantDockSlot(highlighted: Boolean, onTap: (() -> Unit)?) {
-    // Conditionally start the infinite transition only when it is actually
-    // needed.  Compose allows conditional composable calls; the slot table
-    // entry is recycled when highlighted toggles, which is fine here.
-    val borderAlpha: Float
-    val borderWidth = if (highlighted) 2.dp else 1.dp
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val outlineColor = MaterialTheme.colorScheme.outline
-
-    if (highlighted) {
-        val infiniteTransition = rememberInfiniteTransition(label = "dock_pulse")
-        val pulseAlpha by infiniteTransition.animateFloat(
-            initialValue  = 0.4f,
-            targetValue   = 1f,
-            animationSpec = infiniteRepeatable(
-                animation  = tween(durationMillis = 700, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulse"
-        )
-        borderAlpha = pulseAlpha
-
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier         = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .border(borderWidth, primaryColor.copy(alpha = borderAlpha), CircleShape)
-                .then(if (onTap != null) Modifier.clickable { onTap() } else Modifier)
-        ) {
-            Icon(
-                imageVector        = Icons.Default.Add,
-                contentDescription = "Place here",
-                tint               = primaryColor.copy(alpha = borderAlpha),
-                modifier           = Modifier.size(22.dp)
-            )
-        }
-    } else {
-        // Static slot — no animation running, no frame callbacks scheduled.
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .border(borderWidth, outlineColor.copy(alpha = 0.3f), CircleShape)
-        )
     }
 }
