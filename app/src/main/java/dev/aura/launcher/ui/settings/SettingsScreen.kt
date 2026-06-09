@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,12 +27,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -41,6 +44,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,13 +52,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.aura.launcher.ui.home.AuraEvent
 import dev.aura.launcher.ui.home.AuraUiState
+import dev.aura.launcher.ui.theme.AURA_PALETTES
 
 @Composable
 fun SettingsScreen(
@@ -77,17 +84,9 @@ fun SettingsScreen(
         label = "settings_nav"
     ) { gestures ->
         if (gestures) {
-            GestureSettingsScreen(
-                state   = state,
-                onEvent = onEvent,
-                onBack  = { showGestures = false }
-            )
+            GestureSettingsScreen(state = state, onEvent = onEvent, onBack = { showGestures = false })
         } else {
-            SettingsContent(
-                state             = state,
-                onEvent           = onEvent,
-                onOpenGestures    = { showGestures = true }
-            )
+            SettingsContent(state = state, onEvent = onEvent, onOpenGestures = { showGestures = true })
         }
     }
 }
@@ -99,6 +98,54 @@ private fun SettingsContent(
     onOpenGestures: () -> Unit
 ) {
     val settings = state.settings
+    var showAbout by remember { mutableStateOf(false) }
+
+    // ── About dialog ─────────────────────────────────────────────────────────
+    if (showAbout) {
+        AlertDialog(
+            onDismissRequest = { showAbout = false },
+            icon  = { Icon(Icons.Default.Info, contentDescription = null,
+                           tint = MaterialTheme.colorScheme.primary) },
+            title = {
+                Text("Aura Launcher",
+                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+            },
+            text  = {
+                Column {
+                    Text(
+                        "Version 1.0.0",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Developed by BorgorNinja",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "A clean, minimal Android home screen launcher " +
+                        "built with Jetpack Compose and Material You design " +
+                        "principles. Fast, customizable, and open-source.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "github.com/BorgorNinja/aura-launcher",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAbout = false }) { Text("Close") }
+            }
+        )
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -108,25 +155,19 @@ private fun SettingsContent(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 32.dp)
         ) {
-            // ── Header ───────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────────
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                Icon(
-                    imageVector        = Icons.Default.Palette,
-                    contentDescription = null,
-                    tint               = MaterialTheme.colorScheme.primary,
-                    modifier           = Modifier.size(28.dp)
-                )
+                Icon(Icons.Default.Palette, null,
+                     tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
-                Text(
-                    "Launcher Settings",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
-                )
+                Text("Launcher Settings",
+                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold))
             }
 
-            // ── Hero card ────────────────────────────────────────────
+            // ── Hero card ─────────────────────────────────────────────────────
             Card(
                 shape  = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent),
@@ -146,26 +187,20 @@ private fun SettingsContent(
                         .padding(24.dp)
                 ) {
                     Column {
-                        Text(
-                            "Personalize your space",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                color = Color.White, fontWeight = FontWeight.Bold
-                            )
-                        )
+                        Text("Personalize your space",
+                             style = MaterialTheme.typography.titleLarge.copy(
+                                 color = Color.White, fontWeight = FontWeight.Bold))
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Tailor your home screen experience\nwith advanced Material You styling.",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = Color.White.copy(alpha = 0.85f)
-                            )
-                        )
+                        Text("Tailor your home screen experience\nwith advanced Material You styling.",
+                             style = MaterialTheme.typography.bodyMedium.copy(
+                                 color = Color.White.copy(alpha = 0.85f)))
                     }
                 }
             }
 
             Spacer(Modifier.height(24.dp))
 
-            // ── APPEARANCE ───────────────────────────────────────────
+            // ── APPEARANCE ────────────────────────────────────────────────────
             SectionHeader("APPEARANCE")
 
             SettingsGroup {
@@ -186,18 +221,39 @@ private fun SettingsContent(
                         onEvent(AuraEvent.SetDarkTheme(next))
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
-                SettingsRow(
-                    icon     = Icons.Default.Palette,
-                    title    = "Icon Pack",
-                    subtitle = if (settings.iconPackPackage.isEmpty()) "Material You (Dynamic)" else settings.iconPackPackage,
-                    onClick  = { /* TODO: icon pack picker */ }
-                )
             }
 
             Spacer(Modifier.height(16.dp))
 
-            // ── LAYOUT & FEEL ────────────────────────────────────────
+            // ── COLOR THEME ───────────────────────────────────────────────────
+            SectionHeader("COLOR THEME")
+
+            Card(
+                shape    = RoundedCornerShape(20.dp),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Choose a palette",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    ColorThemePicker(
+                        currentTheme   = settings.colorTheme,
+                        onSelectTheme  = { onEvent(AuraEvent.SetColorTheme(it)) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── LAYOUT & FEEL ─────────────────────────────────────────────────
             SectionHeader("LAYOUT & FEEL")
 
             SettingsGroup {
@@ -214,21 +270,15 @@ private fun SettingsContent(
                                     .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    Icons.Default.GridView, null,
-                                    tint     = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Icon(Icons.Default.GridView, null,
+                                     tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             }
                             Spacer(Modifier.width(16.dp))
                             Column {
                                 Text("Home Screen Grid", style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    "${settings.gridColumns} columns",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                )
+                                Text("${settings.gridColumns} columns",
+                                     style = MaterialTheme.typography.bodySmall.copy(
+                                         color = MaterialTheme.colorScheme.onSurfaceVariant))
                             }
                         }
                     }
@@ -243,7 +293,6 @@ private fun SettingsContent(
 
                 HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
 
-                // Gestures row — fully functional now
                 SettingsRow(
                     icon     = Icons.Default.TouchApp,
                     title    = "Gestures",
@@ -279,15 +328,15 @@ private fun SettingsContent(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── SYSTEM ───────────────────────────────────────────────
+            // ── SYSTEM ────────────────────────────────────────────────────────
             SectionHeader("SYSTEM")
 
             SettingsGroup {
                 SettingsRow(
                     icon     = Icons.Default.Info,
-                    title    = "About",
-                    subtitle = "Aura Launcher 1.0.0",
-                    onClick  = {}
+                    title    = "About Aura Launcher",
+                    subtitle = "Version 1.0.0 · by BorgorNinja",
+                    onClick  = { showAbout = true }
                 )
             }
 
@@ -302,24 +351,89 @@ private fun SettingsContent(
                     .clickable { onEvent(AuraEvent.PickWallpaper) }
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        "Change Wallpaper",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    Text("Change Wallpaper",
+                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Tap to open the system wallpaper picker.",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                        )
-                    )
+                    Text("Tap to open the system wallpaper picker.",
+                         style = MaterialTheme.typography.bodySmall.copy(
+                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)))
                 }
             }
         }
     }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ── Color theme picker ────────────────────────────────────────────────────────
+
+@Composable
+private fun ColorThemePicker(
+    currentTheme:  String,
+    onSelectTheme: (String) -> Unit
+) {
+    val rows = AURA_PALETTES.chunked(3)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        rows.forEach { rowItems ->
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowItems.forEach { palette ->
+                    val selected = currentTheme == palette.key
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier            = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onSelectTheme(palette.key) }
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier         = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(palette.swatchColor)
+                                .then(
+                                    if (selected)
+                                        Modifier.border(
+                                            3.dp,
+                                            MaterialTheme.colorScheme.onBackground,
+                                            CircleShape
+                                        )
+                                    else Modifier
+                                )
+                        ) {
+                            if (selected) {
+                                Icon(
+                                    Icons.Default.Check, null,
+                                    tint     = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            palette.label,
+                            style     = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color      = if (selected) MaterialTheme.colorScheme.primary
+                                             else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            textAlign = TextAlign.Center,
+                            maxLines  = 1
+                        )
+                    }
+                }
+                // Pad incomplete last row
+                repeat(3 - rowItems.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 @Composable
 private fun SectionHeader(text: String) {
@@ -337,7 +451,9 @@ private fun SectionHeader(text: String) {
 private fun SettingsGroup(content: @Composable () -> Unit) {
     Card(
         shape    = RoundedCornerShape(20.dp),
-        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        colors   = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
     ) { content() }
 }
