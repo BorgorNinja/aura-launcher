@@ -27,20 +27,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// ─── State ───────────────────────────────────────────────────────────────────
+// ─── State ────────────────────────────────────────────────────────────────────
 
-/**
- * @Immutable tells the Compose compiler that every publicly observable property
- * of AuraUiState is fixed after construction — we always replace the whole
- * object via StateFlow.update{}, never mutate it in place.
- *
- * Without this annotation the compiler sees List<AppInfo> fields and conservatively
- * marks AuraUiState as UNSTABLE, forcing every composable that reads `state` to
- * recompose on ANY state change — even unrelated ones (e.g. a dock slot change
- * recomposing the search bar). With @Immutable, Compose can skip recomposing
- * stable child composables whose inputs haven't changed, which eliminates a large
- * class of redundant work across DrawerScreen, HomeTab, and MainScreen.
- */
 @Immutable
 data class AuraUiState(
     val selectedTab:    NavigationTab    = NavigationTab.HOME,
@@ -61,7 +49,7 @@ sealed interface SideEffect {
     data object PickWidget    : SideEffect
 }
 
-// ─── Events ──────────────────────────────────────────────────────────────────
+// ─── Events ───────────────────────────────────────────────────────────────────
 
 sealed interface AuraEvent {
     data class SelectTab(val tab: NavigationTab)        : AuraEvent
@@ -76,6 +64,7 @@ sealed interface AuraEvent {
     data class RemoveWidget(val id: Int)                : AuraEvent
     data class SetSwipeDownAction(val action: String)   : AuraEvent
     data class SetDoubleTapAction(val action: String)   : AuraEvent
+    data class SetColorTheme(val theme: String)         : AuraEvent
     // Dock management
     data class StartDockAdd(val app: AppInfo)           : AuraEvent
     data class PlaceDockApp(val slotIndex: Int)         : AuraEvent
@@ -86,7 +75,7 @@ sealed interface AuraEvent {
     data object PickWidget                              : AuraEvent
 }
 
-// ─── ViewModel ───────────────────────────────────────────────────────────────
+// ─── ViewModel ────────────────────────────────────────────────────────────────
 
 @OptIn(FlowPreview::class)
 class AuraViewModel(app: Application) : AndroidViewModel(app) {
@@ -170,6 +159,7 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
             is AuraEvent.SetNotifDots       -> viewModelScope.launch { settingsRepo.setNotificationDots(event.enabled) }
             is AuraEvent.SetSwipeDownAction -> viewModelScope.launch { settingsRepo.setSwipeDownAction(event.action) }
             is AuraEvent.SetDoubleTapAction -> viewModelScope.launch { settingsRepo.setDoubleTapAction(event.action) }
+            is AuraEvent.SetColorTheme      -> viewModelScope.launch { settingsRepo.setColorTheme(event.theme) }
             is AuraEvent.StartDockAdd       -> _state.update {
                 it.copy(pendingDockAdd = event.app, selectedTab = NavigationTab.HOME)
             }
