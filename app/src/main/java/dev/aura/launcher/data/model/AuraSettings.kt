@@ -5,7 +5,8 @@ data class AuraSettings(
     val darkThemeMode:    String  = "system",        // "system" | "light" | "dark"
     val notificationDots: Boolean = true,
     val iconPackPackage:  String  = "",
-    val swipeDownAction:  String  = "notifications", // "notifications"|"camera"|"assistant"|"lock"|"none"
-    val doubleTapAction:  String  = "none",          // "clock"|"camera"|"assistant"|"lock"|"none"
-    val colorTheme:       String  = "dynamic"        // see AuraPaletteEntry.key in AuraTheme.kt
+    val swipeDownAction:  String  = "notifications",
+    val doubleTapAction:  String  = "none",
+    val colorTheme:       String  = "dynamic",       // see AuraPaletteEntry.key
+    val activeDockGroup:  Int     = 0                // 0..2, which 4-slot group is shown at center
 )
