@@ -67,28 +67,19 @@ fun MainScreen(
         initialPage = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
     ) { TAB_ORDER.size }
 
-    // Tab selection via nav bar → animate pager to that page
     LaunchedEffect(state.selectedTab) {
         val page = TAB_ORDER.indexOf(state.selectedTab).coerceAtLeast(0)
-        if (pagerState.currentPage != page) {
-            pagerState.animateScrollToPage(page)
-        }
+        if (pagerState.currentPage != page) pagerState.animateScrollToPage(page)
     }
 
-    // Pager swipe settles on a page → update tab state
-    // FIX: use `settledPage` (fires only when swipe is complete, not mid-scroll)
-    //      and no condition — the closure would otherwise capture a stale
-    //      `state.selectedTab` from initial composition, causing swiping back
-    //      to HOME from WIDGETS to silently no-op (HOME != HOME → false).
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
             onEvent(AuraEvent.SelectTab(TAB_ORDER[page]))
         }
     }
 
-    // Nav bar hidden on Widgets and Settings — user navigates via swipe
-    val showNav = state.selectedTab == NavigationTab.HOME ||
-                  state.selectedTab == NavigationTab.APPS
+    // Dock nav bar visible only on HOME — hidden on Drawer, Widgets, and Settings
+    val showNav = state.selectedTab == NavigationTab.HOME
 
     CompositionLocalProvider(LocalWidgetHost provides widgetHost) {
         Box(modifier = Modifier.fillMaxSize()) {
