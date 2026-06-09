@@ -41,7 +41,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var vm: AuraViewModel
     private lateinit var widgetHost: SafeAppWidgetHost
 
-    // ── Gallery → wallpaper ───────────────────────────────────────────────────
     private val wallpaperLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -54,24 +53,16 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) openGallery() }
 
-    // ── Startup permission chain ──────────────────────────────────────────────
-    // Step 1: request media/storage permission
-    // Step 2: after that resolves, request battery optimization exemption
     private val startupPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Media permission result handled; proceed to battery optimization
-        requestBatteryOptimizationExemption()
-    }
+    ) { _ -> requestBatteryOptimizationExemption() }
 
-    // ── Widget picker ─────────────────────────────────────────────────────────
     private val widgetPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val id = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
         if (id == -1) return@registerForActivityResult
-
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
         if (info?.configure != null) {
             widgetConfigLauncher.launch(
@@ -94,8 +85,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -112,7 +101,7 @@ class MainActivity : ComponentActivity() {
                 "dark"  -> true
                 else    -> isSystemDark()
             }
-            AuraTheme(darkTheme = dark) {
+            AuraTheme(darkTheme = dark, colorTheme = state.settings.colorTheme) {
                 MainScreen(
                     state       = state,
                     onEvent     = vm::onEvent,
@@ -133,7 +122,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Request media/files permissions and battery optimization on first launch
         requestStartupPermissions()
     }
 
@@ -159,18 +147,9 @@ class MainActivity : ComponentActivity() {
         runCatching { widgetHost.stopListening() }
     }
 
-    // ── Startup permission flow ───────────────────────────────────────────────
-
-    /**
-     * Called once on first launch (and any time permissions are still missing).
-     * Requests media/storage permissions as a batch, then chains into the
-     * battery optimization prompt once that resolves.
-     */
     private fun requestStartupPermissions() {
         val needed = mutableListOf<String>()
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ — granular media permissions
             if (checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
                 needed += Manifest.permission.READ_MEDIA_IMAGES
             if (checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED)
@@ -178,25 +157,13 @@ class MainActivity : ComponentActivity() {
             if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED)
                 needed += Manifest.permission.READ_MEDIA_AUDIO
         } else {
-            // Android 12 and below
             if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
                 needed += Manifest.permission.READ_EXTERNAL_STORAGE
         }
-
-        if (needed.isNotEmpty()) {
-            startupPermissionLauncher.launch(needed.toTypedArray())
-        } else {
-            // Permissions already granted — go straight to battery optimization
-            requestBatteryOptimizationExemption()
-        }
+        if (needed.isNotEmpty()) startupPermissionLauncher.launch(needed.toTypedArray())
+        else requestBatteryOptimizationExemption()
     }
 
-    /**
-     * Asks the user to exempt Aura Launcher from battery optimization.
-     * This prevents Android from killing the launcher process in the background,
-     * which can cause widget updates and notification dots to stop working.
-     * Only shown when not already exempted.
-     */
     private fun requestBatteryOptimizationExemption() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
@@ -210,13 +177,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Wallpaper ─────────────────────────────────────────────────────────────
     private fun requestWallpaperFromGallery() {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_IMAGES
         else
             Manifest.permission.READ_EXTERNAL_STORAGE
-
         if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) openGallery()
         else permissionLauncher.launch(permission)
     }
