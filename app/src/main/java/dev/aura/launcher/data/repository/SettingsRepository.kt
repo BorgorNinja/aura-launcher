@@ -23,7 +23,8 @@ class SettingsRepository(private val context: Context) {
         val KEY_SWIPE_DOWN_ACTION = stringPreferencesKey("swipe_down_action")
         val KEY_DOUBLE_TAP_ACTION = stringPreferencesKey("double_tap_action")
         val KEY_COLOR_THEME       = stringPreferencesKey("color_theme")
-        // Dock: 4 slots stored as "pkg1|pkg2||pkg4" (empty = vacant)
+        val KEY_DOCK_GROUP        = intPreferencesKey("dock_group")
+        // 12 slots: 3 groups × 4 slots, pipe-separated; empty string = vacant
         val KEY_DOCK_SLOTS        = stringPreferencesKey("dock_slots")
     }
 
@@ -35,7 +36,8 @@ class SettingsRepository(private val context: Context) {
             iconPackPackage  = prefs[KEY_ICON_PACK]         ?: "",
             swipeDownAction  = prefs[KEY_SWIPE_DOWN_ACTION] ?: "notifications",
             doubleTapAction  = prefs[KEY_DOUBLE_TAP_ACTION] ?: "none",
-            colorTheme       = prefs[KEY_COLOR_THEME]       ?: "dynamic"
+            colorTheme       = prefs[KEY_COLOR_THEME]       ?: "dynamic",
+            activeDockGroup  = prefs[KEY_DOCK_GROUP]        ?: 0
         )
     }
 
@@ -44,11 +46,18 @@ class SettingsRepository(private val context: Context) {
             .split(",").filter { it.isNotBlank() }.mapNotNull { it.toIntOrNull() }
     }
 
-    /** Emits a list of exactly 4 items — null means the slot is vacant. */
+    /**
+     * Emits exactly 12 items (3 groups × 4 slots). null = vacant.
+     * Migrates legacy 4-item format by placing those apps in group 0.
+     */
     val dockSlots: Flow<List<String?>> = context.dataStore.data.map { prefs ->
-        val raw = prefs[KEY_DOCK_SLOTS] ?: "|||"
-        raw.split("|").take(4).map { it.ifEmpty { null } }.let { list ->
-            list + List((4 - list.size).coerceAtLeast(0)) { null }
+        val raw   = prefs[KEY_DOCK_SLOTS] ?: ""
+        val parts = raw.split("|").map { it.ifEmpty { null } }
+        when {
+            parts.size >= 12 -> parts.take(12)
+            // Legacy: 4-slot string → promote to group 0, groups 1+2 empty
+            parts.isNotEmpty() -> (parts.take(4) + List(8) { null })
+            else               -> List(12) { null }
         }
     }
 
@@ -59,14 +68,16 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSwipeDownAction(action: String)  = context.dataStore.edit { it[KEY_SWIPE_DOWN_ACTION] = action }
     suspend fun setDoubleTapAction(action: String)  = context.dataStore.edit { it[KEY_DOUBLE_TAP_ACTION] = action }
     suspend fun setColorTheme(theme: String)        = context.dataStore.edit { it[KEY_COLOR_THEME]       = theme }
+    suspend fun setDockGroup(group: Int)            = context.dataStore.edit { it[KEY_DOCK_GROUP]        = group.coerceIn(0, 2) }
 
-    suspend fun setDockSlot(index: Int, packageName: String?) {
+    suspend fun setDockSlot(absIndex: Int, packageName: String?) {
         context.dataStore.edit { prefs ->
-            val slots = (prefs[KEY_DOCK_SLOTS] ?: "|||")
-                .split("|").take(4).toMutableList()
-            while (slots.size < 4) slots.add("")
-            slots[index.coerceIn(0, 3)] = packageName ?: ""
-            prefs[KEY_DOCK_SLOTS] = slots.joinToString("|")
+            val current = (prefs[KEY_DOCK_SLOTS] ?: "")
+            val parts   = current.split("|").toMutableList()
+            // Ensure list is 12 items
+            while (parts.size < 12) parts.add("")
+            parts[absIndex.coerceIn(0, 11)] = packageName ?: ""
+            prefs[KEY_DOCK_SLOTS] = parts.joinToString("|")
         }
     }
 
