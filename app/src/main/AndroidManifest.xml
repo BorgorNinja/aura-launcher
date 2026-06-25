@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES"/>
@@ -22,6 +23,19 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AuraLauncher"
         android:hardwareAccelerated="true">
+
+        <!--
+            <profileable> tells ART this app may be profiled on production devices.
+            android:shell="false"  disables raw adb-shell profiling (keeps release
+            builds secure) while still allowing Play Store cloud profiles and the
+            androidx.profileinstaller library to install our baseline-prof.txt on
+            first launch.
+            tools:targetApi="q"    suppresses the API-29 lint warning without
+            raising minSdk — our minSdk stays at 26 (Android 8).
+        -->
+        <profileable
+            android:shell="false"
+            tools:targetApi="q" />
 
         <activity
             android:name=".MainActivity"
