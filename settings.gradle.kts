@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AuraLauncher"
 include(":app")
+include(":baselineprofile")
