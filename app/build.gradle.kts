@@ -6,6 +6,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    // ── ART / Baseline Profiles ───────────────────────────────────────────
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // ─── Version (injected by CI, falls back to defaults locally) ────────────────
@@ -160,4 +162,17 @@ dependencies {
 
     implementation(libs.datastore.preferences)
     implementation(libs.coroutines.android)
+
+    // ── ART / Baseline Profiles ───────────────────────────────────────────────
+    // profileinstaller: eagerly installs the baseline profile on first app launch
+    // so ART can AOT-compile the declared hot paths before the Play Store
+    // cloud-profile optimiser has a chance to run (typically 24 h after install).
+    // Critical for launchers — startup latency is directly user-visible on
+    // every home button press and device wake.
+    implementation(libs.profileinstaller)
+
+    // baselineProfile: links the :baselineprofile Macrobenchmark module so that
+    // ./gradlew :baselineprofile:generateBaselineProfile regenerates baseline-prof.txt
+    // from a real connected device trace and installs it into this module.
+    baselineProfile(project(":baselineprofile"))
 }
