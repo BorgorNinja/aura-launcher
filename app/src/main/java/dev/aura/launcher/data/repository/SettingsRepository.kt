@@ -18,7 +18,6 @@ class SettingsRepository(private val context: Context) {
         val KEY_GRID_COLUMNS      = intPreferencesKey("grid_columns")
         val KEY_DARK_THEME_MODE   = stringPreferencesKey("dark_theme_mode")
         val KEY_NOTIFICATION_DOTS = booleanPreferencesKey("notification_dots")
-        val KEY_ICON_PACK         = stringPreferencesKey("icon_pack")
         val KEY_WIDGET_IDS        = stringPreferencesKey("widget_ids")
         val KEY_SWIPE_DOWN_ACTION = stringPreferencesKey("swipe_down_action")
         val KEY_DOUBLE_TAP_ACTION = stringPreferencesKey("double_tap_action")
@@ -33,7 +32,6 @@ class SettingsRepository(private val context: Context) {
             gridColumns      = prefs[KEY_GRID_COLUMNS]      ?: 4,
             darkThemeMode    = prefs[KEY_DARK_THEME_MODE]   ?: "system",
             notificationDots = prefs[KEY_NOTIFICATION_DOTS] ?: true,
-            iconPackPackage  = prefs[KEY_ICON_PACK]         ?: "",
             swipeDownAction  = prefs[KEY_SWIPE_DOWN_ACTION] ?: "notifications",
             doubleTapAction  = prefs[KEY_DOUBLE_TAP_ACTION] ?: "none",
             colorTheme       = prefs[KEY_COLOR_THEME]       ?: "dynamic",
@@ -64,7 +62,6 @@ class SettingsRepository(private val context: Context) {
     suspend fun setGridColumns(value: Int)          = context.dataStore.edit { it[KEY_GRID_COLUMNS]      = value.coerceIn(3, 6) }
     suspend fun setDarkThemeMode(value: String)     = context.dataStore.edit { it[KEY_DARK_THEME_MODE]   = value }
     suspend fun setNotificationDots(value: Boolean) = context.dataStore.edit { it[KEY_NOTIFICATION_DOTS] = value }
-    suspend fun setIconPack(pkg: String)            = context.dataStore.edit { it[KEY_ICON_PACK]         = pkg }
     suspend fun setSwipeDownAction(action: String)  = context.dataStore.edit { it[KEY_SWIPE_DOWN_ACTION] = action }
     suspend fun setDoubleTapAction(action: String)  = context.dataStore.edit { it[KEY_DOUBLE_TAP_ACTION] = action }
     suspend fun setColorTheme(theme: String)        = context.dataStore.edit { it[KEY_COLOR_THEME]       = theme }
