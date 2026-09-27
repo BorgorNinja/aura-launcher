@@ -88,7 +88,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
 
         vm         = ViewModelProvider(this, AuraViewModel.Factory(application))[AuraViewModel::class.java]
@@ -212,3 +211,4 @@ class MainActivity : ComponentActivity() {
     @Deprecated("Suppress system back on launcher")
     override fun onBackPressed() { }
 }
+
