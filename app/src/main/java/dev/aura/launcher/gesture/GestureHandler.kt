@@ -27,9 +27,16 @@ class GestureHandler(
 ) : GestureDetector.SimpleOnGestureListener() {
 
     companion object {
-        private const val SWIPE_THRESHOLD     = 100   // px
-        private const val SWIPE_VELOCITY_MIN  = 100   // px/s
+        // Defined in dp so the swipe feels the same across screen densities —
+        // the previous raw-px constants (100) meant the gesture was easier to
+        // trigger on low-density screens and harder on high-density ones.
+        private const val SWIPE_THRESHOLD_DP     = 50f
+        private const val SWIPE_VELOCITY_MIN_DP  = 50f
     }
+
+    private val density         = context.resources.displayMetrics.density
+    private val swipeThreshold  = SWIPE_THRESHOLD_DP * density
+    private val swipeVelocityMin = SWIPE_VELOCITY_MIN_DP * density
 
     val detector = GestureDetector(context, this)
 
@@ -41,7 +48,7 @@ class GestureHandler(
         val dY = e2.y - (e1?.y ?: 0f)
 
         return when {
-            abs(dY) > abs(dX) && abs(dY) > SWIPE_THRESHOLD && abs(velocityY) > SWIPE_VELOCITY_MIN -> {
+            abs(dY) > abs(dX) && abs(dY) > swipeThreshold && abs(velocityY) > swipeVelocityMin -> {
                 if (dY < 0) onSwipeUp() else onSwipeDown()
                 true
             }
