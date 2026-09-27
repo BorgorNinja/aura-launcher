@@ -57,14 +57,25 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ -> requestBatteryOptimizationExemption() }
 
+    // Tracks the widget ID allocated for the in-flight picker/configure flow.
+    // Read from this field, not result.data — the system picker/configure
+    // activity is not guaranteed to echo EXTRA_APPWIDGET_ID back on cancel,
+    // which previously meant a cancelled flow could never clean up the ID
+    // it had already allocated on the host.
+    private var pendingWidgetId: Int = -1
+
     private val widgetPickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode != RESULT_OK) return@registerForActivityResult
-        val id = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
-        if (id == -1) return@registerForActivityResult
+        val id = pendingWidgetId
+        pendingWidgetId = -1
+        if (result.resultCode != RESULT_OK || id == -1) {
+            if (id != -1) runCatching { widgetHost.deleteAppWidgetId(id) }
+            return@registerForActivityResult
+        }
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
         if (info?.configure != null) {
+            pendingWidgetId = id
             widgetConfigLauncher.launch(
                 Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
                     component = info.configure
@@ -79,9 +90,12 @@ class MainActivity : ComponentActivity() {
     private val widgetConfigLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val id = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
-            if (id != -1) vm.onEvent(AuraEvent.AddWidget(id))
+        val id = pendingWidgetId
+        pendingWidgetId = -1
+        if (result.resultCode == RESULT_OK && id != -1) {
+            vm.onEvent(AuraEvent.AddWidget(id))
+        } else if (id != -1) {
+            runCatching { widgetHost.deleteAppWidgetId(id) }
         }
     }
 
@@ -200,7 +214,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchWidgetPicker() {
-        runCatching { widgetPickerLauncher.launch(widgetPickerIntent(widgetHost)) }
+        runCatching {
+            val intent = widgetPickerIntent(widgetHost)
+            pendingWidgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
+            widgetPickerLauncher.launch(intent)
+        }
     }
 
     private fun isSystemDark(): Boolean {
