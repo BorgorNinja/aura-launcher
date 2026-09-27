@@ -89,4 +89,16 @@ class SettingsRepository(private val context: Context) {
             .split(",").filter { it.isNotBlank() && it != id.toString() }
         prefs[KEY_WIDGET_IDS] = ids.joinToString(",")
     }
+
+    /**
+     * Applies an old->new widget ID mapping after AppWidgetManager restores
+     * widget IDs from a backup (they are never the same IDs as on the
+     * original device). Called from AuraWidgetReceiver on
+     * ACTION_APPWIDGET_HOST_RESTORED.
+     */
+    suspend fun remapWidgetIds(oldToNew: Map<Int, Int>) = context.dataStore.edit { prefs ->
+        val ids = (prefs[KEY_WIDGET_IDS] ?: "")
+            .split(",").filter { it.isNotBlank() }.mapNotNull { it.toIntOrNull() }
+        prefs[KEY_WIDGET_IDS] = ids.joinToString(",") { (oldToNew[it] ?: it).toString() }
+    }
 }
