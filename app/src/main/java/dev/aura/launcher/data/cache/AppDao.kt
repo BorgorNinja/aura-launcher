@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import dev.aura.launcher.data.model.AppInfo
 import kotlinx.coroutines.flow.Flow
 
@@ -28,8 +29,31 @@ interface AppDao {
     @Query("SELECT * FROM app_index WHERE category = :cat ORDER BY launchCount DESC")
     fun byCategory(cat: Int): Flow<List<AppInfo>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(apps: List<AppInfo>)
+    /**
+     * Upsert that preserves launchCount / lastLaunchMs for apps that already
+     * exist. Callers (AppIndexCache.buildAppInfo) always construct AppInfo
+     * with those fields at their defaults (0), since a scan has no way to
+     * know existing stats. A plain @Insert(REPLACE) here would silently zero
+     * out frecency data on every full scan (every onResume, 30s-debounced)
+     * and on every ACTION_PACKAGE_REPLACED/CHANGED broadcast — which is
+     * exactly what was happening before this fix. Insert-if-new, otherwise
+     * update only label/category on the existing row.
+     */
+    @Transaction
+    suspend fun upsertAll(apps: List<AppInfo>) {
+        for (app in apps) {
+            val inserted = insertIgnore(app)
+            if (inserted == -1L) {
+                updateLabelAndCategory(app.packageName, app.label, app.category)
+            }
+        }
+    }
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(app: AppInfo): Long
+
+    @Query("UPDATE app_index SET label = :label, category = :category WHERE packageName = :packageName")
+    suspend fun updateLabelAndCategory(packageName: String, label: String, category: Int)
 
     /** Remove all rows whose package is not in the active list. */
     @Query("DELETE FROM app_index WHERE packageName NOT IN (:active)")
