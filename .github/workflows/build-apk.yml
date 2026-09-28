@@ -68,10 +68,21 @@ jobs:
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build Debug APK (signed)
+        shell: bash
         run: |
           ./gradlew assembleDebug --no-daemon \
             -PversionCode=${{ github.run_number }} \
-            -PversionName=1.0.${{ github.run_number }}
+            -PversionName=1.0.${{ github.run_number }} 2>&1 | tee build.log
+
+      # Job logs are stored on blob storage that some environments can't reach;
+      # annotations are served by the plain API, so surface compiler errors there.
+      - name: Surface build errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E '^e: |What went wrong|Execution failed|error:' build.log | head -60 > errs.txt || true
+          msg=$(sed -e 's/%/%25/g' -e 's/\r//g' errs.txt | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Gradle compile errors::${msg}"
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
