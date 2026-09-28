@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import dev.aura.launcher.data.model.AppInfo
 import dev.aura.launcher.ui.home.AuraEvent
 import dev.aura.launcher.ui.home.AuraUiState
+import dev.aura.launcher.ui.util.NotificationDot
 import dev.aura.launcher.ui.util.rememberAppIcon
 import kotlinx.coroutines.launch
 
@@ -176,7 +177,8 @@ fun DrawerScreen(
                                 onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
                                 onUninstall = { onEvent(AuraEvent.Uninstall(app.packageName)) },
                                 onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) },
-                                onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) }
+                                onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) },
+                                hasNotification = app.packageName in state.notifiedPackages
                             )
                         }
                     } else {
@@ -211,7 +213,8 @@ fun DrawerScreen(
                                     onClick     = { onEvent(AuraEvent.Launch(app.packageName)) },
                                     onUninstall = { onEvent(AuraEvent.Uninstall(app.packageName)) },
                                     onAppInfo   = { onEvent(AuraEvent.ShowAppInfo(app.packageName)) },
-                                    onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) }
+                                    onAddToDock = { onEvent(AuraEvent.StartDockAdd(app)) },
+                                    hasNotification = app.packageName in state.notifiedPackages
                                 )
                             }
                         }
@@ -272,7 +275,8 @@ fun AppGridItem(
     onClick:     () -> Unit,
     onUninstall: () -> Unit,
     onAppInfo:   () -> Unit,
-    onAddToDock: () -> Unit
+    onAddToDock: () -> Unit,
+    hasNotification: Boolean = false
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val icon: ImageBitmap? = rememberAppIcon(app.packageName, pm)
@@ -303,32 +307,35 @@ fun AppGridItem(
                 )
                 .padding(8.dp)
         ) {
-            if (icon != null) {
-                Image(
-                    bitmap             = icon,
-                    contentDescription = app.label,
-                    modifier           = Modifier.size(52.dp)
-                )
-            } else {
-                // Animated shimmer placeholder while the icon loads.
-                val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
-                val shimmerAlpha by shimmerTransition.animateFloat(
-                    initialValue  = 0.25f,
-                    targetValue   = 0.55f,
-                    animationSpec = infiniteRepeatable(
-                        animation  = tween(700, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    ),
-                    label = "shimmer_alpha"
-                )
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
-                        )
-                )
+            Box {
+                if (icon != null) {
+                    Image(
+                        bitmap             = icon,
+                        contentDescription = app.label,
+                        modifier           = Modifier.size(52.dp)
+                    )
+                } else {
+                    // Animated shimmer placeholder while the icon loads.
+                    val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
+                    val shimmerAlpha by shimmerTransition.animateFloat(
+                        initialValue  = 0.25f,
+                        targetValue   = 0.55f,
+                        animationSpec = infiniteRepeatable(
+                            animation  = tween(700, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "shimmer_alpha"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = shimmerAlpha)
+                            )
+                    )
+                }
+                if (hasNotification) NotificationDot()
             }
             Spacer(Modifier.height(4.dp))
             Text(

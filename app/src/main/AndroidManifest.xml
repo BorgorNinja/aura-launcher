@@ -62,6 +62,15 @@
                 android:resource="@xml/lock_service_config"/>
         </service>
 
+        <service
+            android:name=".service.NotificationDotService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
+
         <receiver android:name=".widget.AuraWidgetReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_HOST_RESTORED"/>

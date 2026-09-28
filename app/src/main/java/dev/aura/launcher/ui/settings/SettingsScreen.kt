@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -46,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,9 +58,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.aura.launcher.service.NotificationDotService
 import dev.aura.launcher.ui.home.AuraEvent
 import dev.aura.launcher.ui.home.AuraUiState
 import dev.aura.launcher.ui.theme.AURA_PALETTES
@@ -99,6 +103,11 @@ private fun SettingsContent(
 ) {
     val settings = state.settings
     var showAbout by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // `connected` flips reactively when access is granted/revoked; isEnabled() covers
+    // the window right after process start before the system has bound the listener.
+    val listenerConnected by NotificationDotService.connected.collectAsState()
+    val notifAccessGranted = listenerConnected || NotificationDotService.isEnabled(context)
 
     // ── About dialog ─────────────────────────────────────────────────────────
     if (showAbout) {
@@ -324,6 +333,42 @@ private fun SettingsContent(
                     checked  = settings.notificationDots,
                     onToggle = { onEvent(AuraEvent.SetNotifDots(it)) }
                 )
+            }
+
+            // Notification Access banner — only when dots are on but access isn't granted
+            if (settings.notificationDots && !notifAccessGranted) {
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    shape    = RoundedCornerShape(16.dp),
+                    colors   = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, null,
+                                tint     = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Notification Access Needed",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color      = MaterialTheme.colorScheme.onTertiaryContainer))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "To show dots on app icons, allow Aura Launcher in Notification Access settings. " +
+                            "Aura only checks which apps have active notifications; it doesn't store or send their content.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = { NotificationDotService.openSettings(context) }) {
+                            Text("Open Notification Access")
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(16.dp))

@@ -9,6 +9,7 @@ import dev.aura.launcher.data.model.AppInfo
 import dev.aura.launcher.data.model.AuraSettings
 import dev.aura.launcher.data.repository.AppRepository
 import dev.aura.launcher.data.repository.SettingsRepository
+import dev.aura.launcher.service.NotificationDotService
 import dev.aura.launcher.ui.navigation.NavigationTab
 import dev.aura.launcher.util.IconCache
 import kotlinx.coroutines.Dispatchers
@@ -40,7 +41,10 @@ data class AuraUiState(
     val searchResults:  List<AppInfo>    = emptyList(),
     val isSearching:    Boolean          = false,
     val settings:       AuraSettings     = AuraSettings(),
-    val widgetIds:      List<Int>        = emptyList()
+    val widgetIds:      List<Int>        = emptyList(),
+    // Packages with an active notification; already empty when the
+    // notificationDots setting is off, so the UI needs no extra gating.
+    val notifiedPackages: Set<String>    = emptySet()
 )
 
 // ─── Side effects ─────────────────────────────────────────────────────────────
@@ -115,6 +119,12 @@ class AuraViewModel(app: Application) : AndroidViewModel(app) {
 
         settingsRepo.settings.onEach { s ->
             _state.update { it.copy(settings = s) }
+        }.launchIn(viewModelScope)
+
+        combine(NotificationDotService.activePackages, settingsRepo.settings) { active, s ->
+            if (s.notificationDots) active else emptySet()
+        }.onEach { pkgs ->
+            _state.update { it.copy(notifiedPackages = pkgs) }
         }.launchIn(viewModelScope)
 
         settingsRepo.widgetIds.onEach { ids ->

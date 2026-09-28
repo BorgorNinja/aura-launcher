@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import dev.aura.launcher.data.model.AppInfo
 import dev.aura.launcher.service.LockScreenService
 import dev.aura.launcher.ui.navigation.NavigationTab
+import dev.aura.launcher.ui.util.NotificationDot
 import dev.aura.launcher.ui.util.rememberAppIcon
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -171,6 +172,7 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
             DockRow(
                 slots                 = state.dockSlots,
                 pendingAdd            = state.pendingDockAdd,
+                notifiedPackages      = state.notifiedPackages,
                 pm                    = pm,
                 onLaunch              = { onEvent(AuraEvent.Launch(it)) },
                 onRemoveFromDock      = { onEvent(AuraEvent.RemoveFromDock(it)) },
@@ -293,6 +295,7 @@ private fun ClockBlock() {
 private fun DockRow(
     slots:                List<AppInfo?>,
     pendingAdd:           AppInfo?,
+    notifiedPackages:     Set<String>,
     pm:                   PackageManager,
     onLaunch:             (String) -> Unit,
     onRemoveFromDock:     (Int) -> Unit,
@@ -325,6 +328,7 @@ private fun DockRow(
                         app              = app,
                         pm               = pm,
                         dimmed           = pendingAdd != null,
+                        hasNotification  = app.packageName in notifiedPackages,
                         onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
                         onRemoveFromDock = { onRemoveFromDock(index) }
                     )
@@ -347,6 +351,7 @@ private fun OccupiedDockSlot(
     app:              AppInfo,
     pm:               PackageManager,
     dimmed:           Boolean,
+    hasNotification:  Boolean,
     onLaunch:         (() -> Unit)?,
     onRemoveFromDock: () -> Unit
 ) {
@@ -365,19 +370,22 @@ private fun OccupiedDockSlot(
                 .padding(4.dp)
                 .alpha(slotAlpha)
         ) {
-            if (icon != null) {
-                Image(
-                    bitmap             = icon,
-                    contentDescription = app.label,
-                    modifier           = Modifier.size(52.dp)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                )
+            Box {
+                if (icon != null) {
+                    Image(
+                        bitmap             = icon,
+                        contentDescription = app.label,
+                        modifier           = Modifier.size(52.dp)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                }
+                if (hasNotification) NotificationDot()
             }
             Spacer(Modifier.height(4.dp))
             Text(
