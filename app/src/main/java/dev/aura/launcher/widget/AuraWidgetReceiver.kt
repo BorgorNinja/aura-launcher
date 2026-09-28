@@ -17,7 +17,7 @@ private const val TAG = "AuraWidgetReceiver"
  *
  * Restored widget host IDs are never the same as the IDs that existed on
  * the original device — Android hands back the old->new mapping via
- * EXTRA_HOST_OLD_IDS / EXTRA_HOST_NEW_IDS on this broadcast. Previously this
+ * EXTRA_APPWIDGET_OLD_IDS / EXTRA_APPWIDGET_IDS on this broadcast. Previously this
  * receiver was a no-op, so every widget ID persisted in SettingsRepository
  * pointed at nothing after a restore and the dashboard silently showed no
  * widgets (WidgetDashboardScreen skips any ID for which
@@ -28,8 +28,11 @@ class AuraWidgetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != AppWidgetManager.ACTION_APPWIDGET_HOST_RESTORED) return
 
-        val oldIds = intent.getIntArrayExtra(AppWidgetManager.EXTRA_HOST_OLD_IDS)
-        val newIds = intent.getIntArrayExtra(AppWidgetManager.EXTRA_HOST_NEW_IDS)
+        // The broadcast names the host it applies to; ignore other hosts' restores.
+        if (intent.getIntExtra(AppWidgetManager.EXTRA_HOST_ID, WIDGET_HOST_ID) != WIDGET_HOST_ID) return
+
+        val oldIds = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_OLD_IDS)
+        val newIds = intent.getIntArrayExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS)
         if (oldIds == null || newIds == null || oldIds.size != newIds.size || oldIds.isEmpty()) return
 
         val mapping    = oldIds.zip(newIds).toMap()
