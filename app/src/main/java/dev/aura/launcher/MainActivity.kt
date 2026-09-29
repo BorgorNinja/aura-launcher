@@ -205,7 +205,9 @@ class MainActivity : ComponentActivity() {
 
     private fun applyWallpaper(uri: Uri) {
         runCatching {
-            WallpaperManager.getInstance(this).setStream(contentResolver.openInputStream(uri))
+            contentResolver.openInputStream(uri)?.use { stream ->
+                WallpaperManager.getInstance(this).setStream(stream)
+            }
         }
     }
 
@@ -222,7 +224,9 @@ class MainActivity : ComponentActivity() {
         return mode == Configuration.UI_MODE_NIGHT_YES
     }
 
-    @Deprecated("Suppress system back on launcher")
-    override fun onBackPressed() { }
+    @Deprecated("Suppress system back on launcher root, delegate to dispatcher")
+    override fun onBackPressed() {
+        onBackPressedDispatcher.onBackPressed()
+    }
 }
 

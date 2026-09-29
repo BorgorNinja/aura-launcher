@@ -67,8 +67,11 @@ object AppIndexCache {
         val resolved = pm.queryIntentActivities(intent, 0)
 
         val apps = resolved.mapNotNull { ri ->
-            runCatching { buildAppInfo(pm, ri.activityInfo.applicationInfo) }.getOrNull()
-        }
+            runCatching {
+                val label = ri.loadLabel(pm).toString()
+                buildAppInfo(pm, ri.activityInfo.applicationInfo, label)
+            }.getOrNull()
+        }.distinctBy { it.packageName }
 
         dao.upsertAll(apps)
         dao.pruneUninstalled(apps.map { it.packageName })
@@ -80,9 +83,11 @@ object AppIndexCache {
         scope.launch {
             runCatching {
                 val pm = context.packageManager
-                pm.getLaunchIntentForPackage(packageName) ?: return@launch
+                val intent = pm.getLaunchIntentForPackage(packageName) ?: return@launch
+                val ri = pm.resolveActivity(intent, 0)
+                val label = ri?.loadLabel(pm)?.toString()
                 val ai  = pm.getApplicationInfo(packageName, 0)
-                val app = buildAppInfo(pm, ai)
+                val app = buildAppInfo(pm, ai, label)
                 AppDatabase.get(context).appDao().upsertAll(listOf(app))
                 IconCache.evict(packageName)
             }
@@ -102,7 +107,7 @@ object AppIndexCache {
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
-    private fun buildAppInfo(pm: PackageManager, ai: ApplicationInfo): AppInfo {
+    private fun buildAppInfo(pm: PackageManager, ai: ApplicationInfo, explicitLabel: String? = null): AppInfo {
         val category = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             ai.category
         else
@@ -110,7 +115,7 @@ object AppIndexCache {
 
         return AppInfo(
             packageName = ai.packageName,
-            label       = pm.getApplicationLabel(ai).toString(),
+            label       = explicitLabel ?: pm.getApplicationLabel(ai).toString(),
             category    = category
         )
     }

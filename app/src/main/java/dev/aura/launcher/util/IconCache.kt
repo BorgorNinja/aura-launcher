@@ -124,10 +124,13 @@ object IconCache {
                      else Bitmap.createScaledBitmap(native, TARGET_PX, TARGET_PX, true)
                          .also { if (it !== native) native.recycle() }
 
-        // Step 3 — upload to GPU memory
-        val hardware = scaled.copy(Bitmap.Config.HARDWARE, false)
-        scaled.recycle()
-
-        return hardware.asImageBitmap()
+        // Step 3 — upload to GPU memory (fallback safely to software bitmap if GPU copy fails)
+        val hardware = runCatching { scaled.copy(Bitmap.Config.HARDWARE, false) }.getOrNull()
+        return if (hardware != null) {
+            scaled.recycle()
+            hardware.asImageBitmap()
+        } else {
+            scaled.asImageBitmap()
+        }
     }
 }

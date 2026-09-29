@@ -1,6 +1,7 @@
 package dev.aura.launcher.ui
 
 import dev.aura.launcher.widget.SafeAppWidgetHost
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -75,6 +76,15 @@ fun MainScreen(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
             onEvent(AuraEvent.SelectTab(TAB_ORDER[page]))
+        }
+    }
+
+    // Back gesture returns to HOME or dismisses drawer search before leaving
+    BackHandler(enabled = state.selectedTab != NavigationTab.HOME) {
+        if (state.selectedTab == NavigationTab.APPS && state.searchQuery.isNotBlank()) {
+            onEvent(AuraEvent.ClearSearch)
+        } else {
+            onEvent(AuraEvent.SelectTab(NavigationTab.HOME))
         }
     }
 

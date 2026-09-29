@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -166,17 +167,27 @@ fun HomeTab(state: AuraUiState, onEvent: (AuraEvent) -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
+            val group = state.settings.activeDockGroup.coerceIn(0, 2)
+            val startIdx = group * 4
+            val visibleSlots = if (state.dockSlots.size >= startIdx + 4) {
+                state.dockSlots.subList(startIdx, startIdx + 4)
+            } else {
+                state.dockSlots.take(4)
+            }
+
             // Hoist PackageManager here — one LocalContext.current lookup for
             // all dock slots instead of one per OccupiedDockSlot composable.
             val pm = LocalContext.current.packageManager
             DockRow(
-                slots                 = state.dockSlots,
+                slots                 = visibleSlots,
+                activeGroup           = group,
                 pendingAdd            = state.pendingDockAdd,
                 notifiedPackages      = state.notifiedPackages,
                 pm                    = pm,
                 onLaunch              = { onEvent(AuraEvent.Launch(it)) },
-                onRemoveFromDock      = { onEvent(AuraEvent.RemoveFromDock(it)) },
-                onSlotTap             = { onEvent(AuraEvent.PlaceDockApp(it)) },
+                onRemoveFromDock      = { slotInGroup -> onEvent(AuraEvent.RemoveFromDock(startIdx + slotInGroup)) },
+                onSlotTap             = { slotInGroup -> onEvent(AuraEvent.PlaceDockApp(slotInGroup)) },
+                onRotateGroup         = { delta -> onEvent(AuraEvent.RotateDockGroup(delta)) },
                 onLongPressBackground = { onEvent(AuraEvent.PickWallpaper) }
             )
         }
@@ -293,50 +304,95 @@ private fun ClockBlock() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DockRow(
-    slots:                List<AppInfo?>,
-    pendingAdd:           AppInfo?,
-    notifiedPackages:     Set<String>,
-    pm:                   PackageManager,
-    onLaunch:             (String) -> Unit,
-    onRemoveFromDock:     (Int) -> Unit,
-    onSlotTap:            (Int) -> Unit,
+    slots:                 List<AppInfo?>,
+    activeGroup:           Int,
+    pendingAdd:            AppInfo?,
+    notifiedPackages:      Set<String>,
+    pm:                    PackageManager,
+    onLaunch:              (String) -> Unit,
+    onRemoveFromDock:      (Int) -> Unit,
+    onSlotTap:             (Int) -> Unit,
+    onRotateGroup:         (Int) -> Unit,
     onLongPressBackground: () -> Unit
 ) {
+    var dragX by remember { mutableFloatStateOf(0f) }
+
     Surface(
         shape          = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         color          = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
         tonalElevation = 4.dp,
         modifier       = Modifier
             .fillMaxWidth()
+            .pointerInput("dock_drag") {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragX = 0f },
+                    onDragEnd   = {
+                        if (dragX < -40f) onRotateGroup(1)
+                        else if (dragX > 40f) onRotateGroup(-1)
+                        dragX = 0f
+                    },
+                    onHorizontalDrag = { _, delta -> dragX += delta }
+                )
+            }
             .combinedClickable(
                 onClick     = {},
                 onLongClick = if (pendingAdd == null) onLongPressBackground else null
             )
     ) {
-        Row(
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment     = Alignment.CenterVertically,
-            modifier              = Modifier
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier            = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .padding(horizontal = 24.dp, vertical = 8.dp)
                 .padding(bottom = 72.dp)
         ) {
-            slots.forEachIndexed { index, app ->
-                if (app != null) {
-                    OccupiedDockSlot(
-                        app              = app,
-                        pm               = pm,
-                        dimmed           = pendingAdd != null,
-                        hasNotification  = app.packageName in notifiedPackages,
-                        onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
-                        onRemoveFromDock = { onRemoveFromDock(index) }
+            // Group dots (3 pages)
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment     = Alignment.CenterVertically,
+                modifier              = Modifier.padding(bottom = 8.dp)
+            ) {
+                for (i in 0 until 3) {
+                    val isCurrent = i == activeGroup
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .size(if (isCurrent) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isCurrent) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                            )
+                            .clickable {
+                                val delta = i - activeGroup
+                                if (delta != 0) onRotateGroup(delta)
+                            }
                     )
-                } else {
-                    VacantDockSlot(
-                        highlighted = pendingAdd != null,
-                        onTap       = if (pendingAdd != null) { { onSlotTap(index) } } else null
-                    )
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment     = Alignment.CenterVertically,
+                modifier              = Modifier.fillMaxWidth()
+            ) {
+                slots.forEachIndexed { index, app ->
+                    if (app != null) {
+                        OccupiedDockSlot(
+                            app              = app,
+                            pm               = pm,
+                            dimmed           = pendingAdd != null,
+                            hasNotification  = app.packageName in notifiedPackages,
+                            onLaunch         = if (pendingAdd == null) { { onLaunch(app.packageName) } } else null,
+                            onRemoveFromDock = { onRemoveFromDock(index) }
+                        )
+                    } else {
+                        VacantDockSlot(
+                            highlighted = pendingAdd != null,
+                            onTap       = if (pendingAdd != null) { { onSlotTap(index) } } else null
+                        )
+                    }
                 }
             }
         }

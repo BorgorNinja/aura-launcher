@@ -33,11 +33,10 @@ fun rememberAppIcon(packageName: String, pm: PackageManager): ImageBitmap? {
     // list loaded.  remember() stores the result in the composition slot so
     // this block only executes once per item (not on every recomposition).
     val cached = remember(packageName) { IconCache.getSync(packageName) }
-    if (cached != null) return cached
-
-    // Slow path — icon not yet cached; load async and return null→bitmap.
-    return produceState<ImageBitmap?>(initialValue = null, key1 = packageName) {
-        value = IconCache.getOrLoad(packageName, pm)
+    return produceState<ImageBitmap?>(initialValue = cached, key1 = packageName) {
+        if (value == null) {
+            value = IconCache.getOrLoad(packageName, pm)
+        }
     }.value
 }
 

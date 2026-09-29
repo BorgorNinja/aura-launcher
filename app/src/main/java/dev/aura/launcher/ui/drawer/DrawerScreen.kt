@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -230,13 +231,29 @@ fun DrawerScreen(
                             .width(24.dp)
                             .padding(vertical = 8.dp)
                             .pointerInput(letterPositions) {
+                                detectVerticalDragGestures(
+                                    onDragStart = { offset ->
+                                        val fraction = (offset.y / size.height).coerceIn(0f, 1f)
+                                        val idx = (fraction * letters.size).toInt().coerceIn(0, letters.lastIndex)
+                                        val pos = letterPositions[letters[idx]] ?: return@detectVerticalDragGestures
+                                        coroutineScope.launch { gridState.scrollToItem(pos) }
+                                    },
+                                    onVerticalDrag = { change, _ ->
+                                        val fraction = (change.position.y / size.height).coerceIn(0f, 1f)
+                                        val idx = (fraction * letters.size).toInt().coerceIn(0, letters.lastIndex)
+                                        val pos = letterPositions[letters[idx]] ?: return@detectVerticalDragGestures
+                                        coroutineScope.launch { gridState.scrollToItem(pos) }
+                                    }
+                                )
+                            }
+                            .pointerInput(letterPositions) {
                                 detectTapGestures { offset ->
                                     val fraction = (offset.y / size.height).coerceIn(0f, 1f)
                                     val idx = (fraction * letters.size)
                                         .toInt()
                                         .coerceIn(0, letters.lastIndex)
                                     val pos = letterPositions[letters[idx]] ?: return@detectTapGestures
-                                    coroutineScope.launch { gridState.animateScrollToItem(pos) }
+                                    coroutineScope.launch { gridState.scrollToItem(pos) }
                                 }
                             },
                         verticalArrangement   = Arrangement.SpaceEvenly,
