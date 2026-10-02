@@ -4,6 +4,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.IntOffset
 
 /**
  * Spring configurations and transition curves adapted from Lawnchair / AOSP Launcher3.
@@ -33,6 +34,16 @@ object LauncherAnimations {
     )
 
     val EmphasizedExitTween = tween<Float>(
+        durationMillis = 250,
+        easing = EmphasizedAccelerateEasing
+    )
+
+    val EmphasizedOffsetEnterTween = tween<IntOffset>(
+        durationMillis = 320,
+        easing = EmphasizedDecelerateEasing
+    )
+
+    val EmphasizedOffsetExitTween = tween<IntOffset>(
         durationMillis = 250,
         easing = EmphasizedAccelerateEasing
     )

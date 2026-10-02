@@ -109,9 +109,9 @@ fun MainScreen(
 
             AnimatedVisibility(
                 visible  = showNav,
-                enter    = slideInVertically(animationSpec = LauncherAnimations.EmphasizedEnterTween) { it } +
+                enter    = slideInVertically(animationSpec = LauncherAnimations.EmphasizedOffsetEnterTween) { it } +
                            fadeIn(animationSpec = LauncherAnimations.EmphasizedEnterTween),
-                exit     = slideOutVertically(animationSpec = LauncherAnimations.EmphasizedExitTween) { it } +
+                exit     = slideOutVertically(animationSpec = LauncherAnimations.EmphasizedOffsetExitTween) { it } +
                            fadeOut(animationSpec = LauncherAnimations.EmphasizedExitTween),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
