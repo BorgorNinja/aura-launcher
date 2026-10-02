@@ -10,9 +10,13 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import dev.aura.launcher.ui.animation.LauncherAnimations
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -57,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -415,13 +420,24 @@ private fun OccupiedDockSlot(
     val icon     = rememberAppIcon(app.packageName, pm)
     val slotAlpha = if (dimmed) 0.35f else 1f
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue   = if (isPressed) 0.88f else 1f,
+        animationSpec = LauncherAnimations.IconPressSpring,
+        label         = "dock_slot_press_scale"
+    )
+
     Box {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
+                .scale(scale)
                 .combinedClickable(
-                    onClick     = { onLaunch?.invoke() },
-                    onLongClick = { showMenu = true }
+                    interactionSource = interactionSource,
+                    indication        = null,
+                    onClick           = { onLaunch?.invoke() },
+                    onLongClick       = { showMenu = true }
                 )
                 .padding(4.dp)
                 .alpha(slotAlpha)

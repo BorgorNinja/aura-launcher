@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import dev.aura.launcher.ui.animation.LauncherAnimations
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -303,8 +304,8 @@ fun AppGridItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue  = if (isPressed) 0.90f else 1f,
-        animationSpec = tween(durationMillis = 120),
+        targetValue  = if (isPressed) 0.88f else 1f,
+        animationSpec = LauncherAnimations.IconPressSpring,
         label        = "item_press_scale"
     )
 
